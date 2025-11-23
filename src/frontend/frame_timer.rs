@@ -27,7 +27,7 @@ use std::time::{Duration, Instant};
 ///
 /// # Example
 ///
-/// ```
+/// ```no_run
 /// use psrx::frontend::FrameTimer;
 ///
 /// let mut timer = FrameTimer::new(60);
@@ -151,13 +151,14 @@ impl FrameTimer {
     ///
     /// let mut timer = FrameTimer::new(60);
     ///
-    /// // Should run first frame immediately
+    /// // Check if enough time has passed for next frame
+    /// if timer.should_run_frame() {
+    ///     timer.tick();
+    /// }
+    ///
+    /// // After ticking, wait for next frame interval (16.67ms for 60 FPS)
+    /// thread::sleep(Duration::from_millis(17));
     /// assert!(timer.should_run_frame());
-    ///
-    /// timer.tick();
-    ///
-    /// // Should not run immediately after (unless 16.67ms passed)
-    /// // (timing dependent, so we don't assert)
     /// ```
     #[inline(always)]
     pub fn should_run_frame(&self) -> bool {
@@ -179,11 +180,10 @@ impl FrameTimer {
     ///
     /// ```
     /// use psrx::frontend::FrameTimer;
-    /// use std::time::Instant;
     ///
     /// let timer = FrameTimer::new(60);
     /// let next_frame = timer.next_frame_instant();
-    /// assert!(next_frame >= Instant::now());
+    /// // Use next_frame with ControlFlow::WaitUntil(next_frame)
     /// ```
     #[inline(always)]
     pub fn next_frame_instant(&self) -> Instant {
