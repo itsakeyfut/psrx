@@ -22,6 +22,7 @@
 //!
 //! - [`Application`]: Main application struct that handles the event loop and window
 //! - [`renderer`]: Rendering subsystem (wgpu context, etc.)
+//! - [`frame_timer`]: Frame timing utilities for 60 FPS emulation
 //!
 //! # Example
 //!
@@ -30,12 +31,14 @@
 //! use psrx::frontend::Application;
 //!
 //! let event_loop = EventLoop::new().unwrap();
-//! let mut app = Application::new();
+//! let mut app = Application::new("SCPH1001.BIN");
 //! event_loop.run_app(&mut app).unwrap();
 //! ```
 
 pub mod app;
+pub mod frame_timer;
 pub mod renderer;
 
 pub use app::Application;
+pub use frame_timer::FrameTimer;
 pub use renderer::RenderContext;

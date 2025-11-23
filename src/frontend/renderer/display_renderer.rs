@@ -273,18 +273,22 @@ impl DisplayRenderer {
     /// queue.submit(std::iter::once(encoder.finish()));
     /// # }
     /// ```
-    pub fn render(
+    pub fn update_vram(&mut self, queue: &wgpu::Queue, vram: &[u16]) {
+        self.vram_texture.update(queue, vram);
+    }
+
+    /// Render display (without updating VRAM)
+    ///
+    /// Renders the current VRAM texture to the output with display area cropping.
+    /// Call `update_vram()` separately when VRAM changes.
+    pub fn render_display(
         &mut self,
         encoder: &mut wgpu::CommandEncoder,
         output_view: &wgpu::TextureView,
-        vram: &[u16],
         display_area: &DisplayArea,
         _device: &wgpu::Device,
         queue: &wgpu::Queue,
     ) {
-        // Update VRAM texture
-        self.vram_texture.update(queue, vram);
-
         // Update display area uniform
         let uniform_data = DisplayAreaUniform::from(display_area);
         queue.write_buffer(
@@ -338,5 +342,34 @@ impl DisplayRenderer {
             // Draw fullscreen triangle (3 vertices, no vertex buffer)
             render_pass.draw(0..3, 0..1);
         }
+    }
+
+    /// Render VRAM to output texture (legacy method)
+    ///
+    /// Updates the VRAM texture and renders it to the output view with display area cropping.
+    /// For better performance, prefer using `update_vram()` and `render_display()` separately.
+    ///
+    /// # Arguments
+    ///
+    /// * `encoder` - Command encoder for recording GPU commands
+    /// * `output_view` - Output texture view to render to
+    /// * `vram` - VRAM data (1024×512 pixels, 16-bit per pixel)
+    /// * `display_area` - Display area settings (x, y, width, height in VRAM)
+    /// * `device` - wgpu device (needed for bind group creation)
+    /// * `queue` - wgpu queue for uploading data to GPU
+    pub fn render(
+        &mut self,
+        encoder: &mut wgpu::CommandEncoder,
+        output_view: &wgpu::TextureView,
+        vram: &[u16],
+        display_area: &DisplayArea,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+    ) {
+        // Update VRAM texture
+        self.update_vram(queue, vram);
+
+        // Render display
+        self.render_display(encoder, output_view, display_area, device, queue);
     }
 }

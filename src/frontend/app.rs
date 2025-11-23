@@ -18,13 +18,15 @@
 //! This module provides the main application struct that manages the window,
 //! event loop, rendering context, and UI.
 
-use crate::core::gpu::DisplayArea;
+use crate::core::system::System;
+use crate::frontend::frame_timer::FrameTimer;
 use crate::frontend::renderer::{DisplayRenderer, RenderContext};
 use std::sync::Arc;
 use winit::{
     application::ApplicationHandler,
     event::WindowEvent,
     event_loop::ActiveEventLoop,
+    keyboard::{KeyCode, PhysicalKey},
     window::{Window, WindowId},
 };
 
@@ -45,12 +47,22 @@ pub struct Application {
     egui_renderer: Option<egui_wgpu::Renderer>,
     /// Display renderer for VRAM
     display_renderer: Option<DisplayRenderer>,
-    /// Test VRAM data (will be replaced with GPU integration in future phases)
-    test_vram: Vec<u16>,
+    /// PlayStation system (CPU, GPU, Memory, etc.)
+    system: Option<System>,
+    /// Frame timer for 60 FPS timing
+    frame_timer: FrameTimer,
+    /// Emulation paused state
+    paused: bool,
+    /// BIOS file path
+    bios_path: String,
 }
 
 impl Application {
     /// Create a new PSRX application
+    ///
+    /// # Arguments
+    ///
+    /// * `bios_path` - Path to the BIOS file (e.g., "SCPH1001.BIN")
     ///
     /// # Returns
     ///
@@ -63,46 +75,11 @@ impl Application {
     /// use psrx::frontend::Application;
     ///
     /// let event_loop = EventLoop::new().unwrap();
-    /// let mut app = Application::new();
+    /// let mut app = Application::new("SCPH1001.BIN");
     /// event_loop.run_app(&mut app).unwrap();
     /// ```
-    pub fn new() -> Self {
+    pub fn new(bios_path: &str) -> Self {
         let egui_ctx = egui::Context::default();
-
-        // Create test VRAM with a simple pattern (for demonstration)
-        let mut test_vram = vec![0u16; 1024 * 512];
-
-        // Draw a white rectangle (100x100) at position (50, 50)
-        for y in 50..150 {
-            for x in 50..150 {
-                let index = y * 1024 + x;
-                test_vram[index] = 0x7FFF; // White in RGB15
-            }
-        }
-
-        // Draw a red rectangle (80x80) at position (200, 100)
-        for y in 100..180 {
-            for x in 200..280 {
-                let index = y * 1024 + x;
-                test_vram[index] = 0x001F; // Red in RGB15
-            }
-        }
-
-        // Draw a green rectangle (60x60) at position (100, 200)
-        for y in 200..260 {
-            for x in 100..160 {
-                let index = y * 1024 + x;
-                test_vram[index] = 0x03E0; // Green in RGB15
-            }
-        }
-
-        // Draw a blue rectangle (50x50) at position (250, 180)
-        for y in 180..230 {
-            for x in 250..300 {
-                let index = y * 1024 + x;
-                test_vram[index] = 0x7C00; // Blue in RGB15
-            }
-        }
 
         Self {
             window: None,
@@ -111,7 +88,75 @@ impl Application {
             egui_state: None,
             egui_renderer: None,
             display_renderer: None,
-            test_vram,
+            system: None,
+            frame_timer: FrameTimer::new(60),
+            paused: false,
+            bios_path: bios_path.to_string(),
+        }
+    }
+
+    /// Toggle pause/resume emulation
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use psrx::frontend::Application;
+    ///
+    /// let mut app = Application::new("SCPH1001.BIN");
+    /// app.toggle_pause();
+    /// ```
+    pub fn toggle_pause(&mut self) {
+        self.paused = !self.paused;
+        log::info!(
+            "Emulation {}",
+            if self.paused { "paused" } else { "resumed" }
+        );
+    }
+
+    /// Step one frame (when paused)
+    ///
+    /// Executes exactly one frame of emulation when paused.
+    /// Does nothing if emulation is not paused.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use psrx::frontend::Application;
+    ///
+    /// let mut app = Application::new("SCPH1001.BIN");
+    /// app.toggle_pause(); // Pause first
+    /// app.step_frame();   // Step one frame
+    /// ```
+    pub fn step_frame(&mut self) {
+        if self.paused {
+            if let Some(ref mut system) = self.system {
+                if let Err(e) = system.run_frame() {
+                    log::error!("Failed to step frame: {}", e);
+                }
+                // Request redraw
+                if let Some(window) = &self.window {
+                    window.request_redraw();
+                }
+            }
+        }
+    }
+
+    /// Reset the emulation
+    ///
+    /// Resets the PlayStation system to its initial state.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use psrx::frontend::Application;
+    ///
+    /// let mut app = Application::new("SCPH1001.BIN");
+    /// app.reset();
+    /// ```
+    pub fn reset(&mut self) {
+        if let Some(ref mut system) = self.system {
+            system.reset();
+            log::info!("System reset");
         }
     }
 
@@ -119,8 +164,8 @@ impl Application {
     ///
     /// This method handles:
     /// 1. Getting the next surface texture
-    /// 2. Rendering VRAM display
-    /// 3. Running the egui UI code
+    /// 2. Rendering VRAM display from the GPU
+    /// 3. Running the egui UI code with performance metrics
     /// 4. Rendering egui to the surface
     /// 5. Presenting the frame
     fn render(&mut self) -> Result<(), String> {
@@ -141,6 +186,7 @@ impl Application {
             .display_renderer
             .as_mut()
             .ok_or("Display renderer not initialized")?;
+        let system = self.system.as_ref().ok_or("System not initialized")?;
 
         // Get the next frame, handling common surface errors gracefully
         let output = match render_context.surface.get_current_texture() {
@@ -175,15 +221,42 @@ impl Application {
 
         // Begin egui frame
         let raw_input = egui_state.take_egui_input(window);
+        let paused = self.paused;
+        let fps = self.frame_timer.fps();
+        let frame_time_ms = self.frame_timer.frame_time_ms();
+        let frame_count = self.frame_timer.frame_count();
+
         let full_output = self.egui_ctx.run(raw_input, |ctx| {
             // Create a simple UI panel
             egui::CentralPanel::default().show(ctx, |ui| {
                 ui.heading("PSRX - PlayStation Emulator");
                 ui.separator();
-                ui.label("Frontend foundation initialized successfully!");
+
+                // Emulation status
+                ui.horizontal(|ui| {
+                    ui.label("Status:");
+                    if paused {
+                        ui.colored_label(egui::Color32::YELLOW, "⏸ Paused");
+                    } else {
+                        ui.colored_label(egui::Color32::GREEN, "▶ Running");
+                    }
+                });
 
                 ui.separator();
-                ui.label("Status: ✓ Complete");
+
+                // Performance metrics
+                ui.heading("Performance");
+                ui.label(format!("FPS: {:.1}", fps));
+                ui.label(format!("Frame Time: {:.2} ms", frame_time_ms));
+                ui.label(format!("Frame Count: {}", frame_count));
+
+                ui.separator();
+
+                // Controls
+                ui.heading("Controls");
+                ui.label("Space: Pause/Resume");
+                ui.label("F10: Step Frame (when paused)");
+                ui.label("F5: Reset");
 
                 // Add some debug info
                 ui.separator();
@@ -240,11 +313,24 @@ impl Application {
                 });
 
         // Render VRAM display first (clears to black and draws VRAM)
-        let display_area = DisplayArea::default(); // Use default 320x240 display area
-        display_renderer.render(
+        // Get GPU data from the System
+        let gpu = system.gpu();
+        let mut gpu_borrow = gpu.borrow_mut();
+
+        // Only update VRAM texture if GPU modified it (dirty flag optimization)
+        let vram_dirty = gpu_borrow.is_vram_dirty();
+        if vram_dirty {
+            let vram = &gpu_borrow.vram;
+            display_renderer.update_vram(&render_context.queue, vram);
+            gpu_borrow.clear_vram_dirty_flag();
+        }
+
+        let display_area = gpu_borrow.display_area();
+        drop(gpu_borrow); // Drop borrow before render
+
+        display_renderer.render_display(
             &mut encoder,
             &view,
-            &self.test_vram,
             &display_area,
             &render_context.device,
             &render_context.queue,
@@ -303,7 +389,8 @@ impl Application {
 
 impl Default for Application {
     fn default() -> Self {
-        Self::new()
+        // Default BIOS path (users should provide this via command line)
+        Self::new("SCPH1001.BIN")
     }
 }
 
@@ -347,11 +434,21 @@ impl ApplicationHandler for Application {
             let display_renderer =
                 DisplayRenderer::new(&render_context.device, render_context.surface_config.format);
 
+            // Initialize PlayStation System
+            let mut system = System::new();
+            if let Err(e) = system.load_bios(&self.bios_path) {
+                log::error!("Failed to load BIOS from '{}': {}", self.bios_path, e);
+                panic!("Cannot start emulator without valid BIOS");
+            }
+            system.reset();
+            log::info!("System initialized with BIOS: {}", self.bios_path);
+
             self.window = Some(window);
             self.render_context = Some(render_context);
             self.egui_state = Some(egui_state);
             self.egui_renderer = Some(egui_renderer);
             self.display_renderer = Some(display_renderer);
+            self.system = Some(system);
 
             log::info!("Application initialized successfully");
         }
@@ -379,25 +476,63 @@ impl ApplicationHandler for Application {
                     render_context.resize(physical_size.width, physical_size.height);
                 }
             }
+            WindowEvent::KeyboardInput { event, .. } => {
+                // Handle keyboard shortcuts
+                if event.state.is_pressed() {
+                    if let PhysicalKey::Code(key_code) = event.physical_key {
+                        match key_code {
+                            KeyCode::Space => {
+                                self.toggle_pause();
+                            }
+                            KeyCode::F10 => {
+                                self.step_frame();
+                            }
+                            KeyCode::F5 => {
+                                self.reset();
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+            }
             WindowEvent::RedrawRequested => {
                 if let Err(e) = self.render() {
                     log::error!("Render error: {}", e);
                     event_loop.exit();
-                }
-
-                // Request another frame
-                if let Some(window) = &self.window {
-                    window.request_redraw();
                 }
             }
             _ => {}
         }
     }
 
-    fn about_to_wait(&mut self, _event_loop: &ActiveEventLoop) {
-        // Request redraw on each event loop iteration
-        if let Some(window) = &self.window {
-            window.request_redraw();
+    fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+        // Main emulation loop - runs at 60 FPS
+        if !self.paused && self.frame_timer.should_run_frame() {
+            // Run emulation frame
+            if let Some(ref mut system) = self.system {
+                if let Err(e) = system.run_frame() {
+                    log::error!("Emulation error: {}", e);
+                    self.paused = true;
+                }
+            }
+
+            // Update frame timer
+            self.frame_timer.tick();
+
+            // Request redraw
+            if let Some(window) = &self.window {
+                window.request_redraw();
+            }
+        }
+
+        // Set control flow based on emulation state to avoid busy-waiting
+        if self.paused {
+            // When paused, wait for events (keyboard input, etc.)
+            event_loop.set_control_flow(winit::event_loop::ControlFlow::Wait);
+        } else {
+            // When running, wake up at the next frame time for 60 FPS pacing
+            let next_frame = self.frame_timer.next_frame_instant();
+            event_loop.set_control_flow(winit::event_loop::ControlFlow::WaitUntil(next_frame));
         }
     }
 }
