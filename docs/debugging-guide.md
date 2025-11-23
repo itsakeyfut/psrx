@@ -371,7 +371,7 @@ perf report
 - `src/core/cpu/tracer.rs` - Execution tracer
 - `src/core/cpu/mod.rs` - CPU implementation with register dump
 - `src/bin/psrx.rs` - CLI tool
-- `src/core/system.rs` - BIOS boot test
+- `src/core/system/` - BIOS boot test
 
 ### Useful Resources
 

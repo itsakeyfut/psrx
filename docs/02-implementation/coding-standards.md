@@ -119,7 +119,7 @@ src/
 │   ├── memory/
 │   │   ├── mod.rs
 │   │   └── bus.rs
-│   └── system.rs
+│   └── system/
 ├── frontend/               # UI
 │   ├── mod.rs
 │   └── ui/
