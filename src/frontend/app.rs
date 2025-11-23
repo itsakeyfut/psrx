@@ -525,7 +525,14 @@ impl ApplicationHandler for Application {
             }
         }
 
-        // Always request next iteration for smooth event loop
-        event_loop.set_control_flow(winit::event_loop::ControlFlow::Poll);
+        // Set control flow based on emulation state to avoid busy-waiting
+        if self.paused {
+            // When paused, wait for events (keyboard input, etc.)
+            event_loop.set_control_flow(winit::event_loop::ControlFlow::Wait);
+        } else {
+            // When running, wake up at the next frame time for 60 FPS pacing
+            let next_frame = self.frame_timer.next_frame_instant();
+            event_loop.set_control_flow(winit::event_loop::ControlFlow::WaitUntil(next_frame));
+        }
     }
 }

@@ -31,7 +31,7 @@
 //! use psrx::frontend::Application;
 //!
 //! let event_loop = EventLoop::new().unwrap();
-//! let mut app = Application::new();
+//! let mut app = Application::new("SCPH1001.BIN");
 //! event_loop.run_app(&mut app).unwrap();
 //! ```
 

@@ -281,6 +281,9 @@ impl GPU {
 
         // Clear VRAM to black (separate from state reset)
         self.vram.fill(0x0000);
+
+        // Mark VRAM as dirty so frontend uploads cleared texture
+        self.vram_dirty = true;
     }
 
     /// Reset GPU state without clearing VRAM

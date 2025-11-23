@@ -62,11 +62,15 @@ impl FrameTimer {
     ///
     /// # Arguments
     ///
-    /// * `target_fps` - Target frames per second (typically 60)
+    /// * `target_fps` - Target frames per second (typically 60, must be > 0)
     ///
     /// # Returns
     ///
     /// A new `FrameTimer` instance configured for the target FPS
+    ///
+    /// # Panics
+    ///
+    /// Panics if `target_fps` is 0
     ///
     /// # Example
     ///
@@ -77,6 +81,7 @@ impl FrameTimer {
     /// assert_eq!(timer.fps(), 0.0); // No frames executed yet
     /// ```
     pub fn new(target_fps: u32) -> Self {
+        assert!(target_fps > 0, "target_fps must be greater than 0");
         let target_frame_time = Duration::from_nanos(1_000_000_000 / target_fps as u64);
         let now = Instant::now();
 
@@ -158,6 +163,31 @@ impl FrameTimer {
     pub fn should_run_frame(&self) -> bool {
         let elapsed = Instant::now().duration_since(self.last_frame);
         elapsed >= self.target_frame_time
+    }
+
+    /// Get the instant when the next frame should run
+    ///
+    /// Returns the target instant for the next frame based on the last frame time
+    /// and the target frame rate. Used for scheduling event loop wake-ups to avoid
+    /// busy-waiting.
+    ///
+    /// # Returns
+    ///
+    /// The `Instant` when the next frame should execute
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use psrx::frontend::FrameTimer;
+    /// use std::time::Instant;
+    ///
+    /// let timer = FrameTimer::new(60);
+    /// let next_frame = timer.next_frame_instant();
+    /// assert!(next_frame >= Instant::now());
+    /// ```
+    #[inline(always)]
+    pub fn next_frame_instant(&self) -> Instant {
+        self.last_frame + self.target_frame_time
     }
 
     /// Get the current FPS
