@@ -22,6 +22,7 @@
 //!
 //! - [`Application`]: Main application struct that handles the event loop and window
 //! - [`renderer`]: Rendering subsystem (wgpu context, etc.)
+//! - [`frame_timer`]: Frame timing utilities for 60 FPS emulation
 //!
 //! # Example
 //!
@@ -35,7 +36,9 @@
 //! ```
 
 pub mod app;
+pub mod frame_timer;
 pub mod renderer;
 
 pub use app::Application;
+pub use frame_timer::FrameTimer;
 pub use renderer::RenderContext;

@@ -172,6 +172,12 @@ pub struct GPU {
 
     /// HBlank interrupt pending flag
     hblank_interrupt_pending: bool,
+
+    /// VRAM dirty flag
+    ///
+    /// Set to true when VRAM is modified. Used by the frontend to optimize
+    /// texture uploads - only upload VRAM to GPU when this flag is set.
+    vram_dirty: bool,
 }
 
 impl GPU {
@@ -246,6 +252,7 @@ impl GPU {
             hblank_event: None,
             vblank_interrupt_pending: false,
             hblank_interrupt_pending: false,
+            vram_dirty: false,
         };
 
         // Initialize rasterizer with default clip rect
@@ -353,6 +360,7 @@ impl GPU {
     pub fn write_vram(&mut self, x: u16, y: u16, value: u16) {
         let index = self.vram_index(x, y);
         self.vram[index] = value;
+        self.vram_dirty = true;
     }
 
     /// Get VRAM index from coordinates
@@ -374,6 +382,54 @@ impl GPU {
         let x = (x & 0x3FF) as usize; // 0-1023
         let y = (y & 0x1FF) as usize; // 0-511
         y * Self::VRAM_WIDTH + x
+    }
+
+    /// Check if VRAM has been modified
+    ///
+    /// Returns true if VRAM has been modified since the last call to
+    /// `clear_vram_dirty_flag()`. This is used by the frontend to optimize
+    /// texture uploads - only upload VRAM to GPU when this flag is set.
+    ///
+    /// # Returns
+    ///
+    /// `true` if VRAM is dirty, `false` otherwise
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use psrx::core::GPU;
+    ///
+    /// let mut gpu = GPU::new();
+    /// assert!(!gpu.is_vram_dirty()); // Not dirty initially
+    ///
+    /// gpu.write_vram(0, 0, 0x7FFF);
+    /// assert!(gpu.is_vram_dirty()); // Dirty after write
+    /// ```
+    #[inline(always)]
+    pub fn is_vram_dirty(&self) -> bool {
+        self.vram_dirty
+    }
+
+    /// Clear the VRAM dirty flag
+    ///
+    /// Clears the dirty flag after the frontend has uploaded VRAM to the GPU.
+    /// Call this after processing the VRAM data to avoid redundant uploads.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use psrx::core::GPU;
+    ///
+    /// let mut gpu = GPU::new();
+    /// gpu.write_vram(0, 0, 0x7FFF);
+    /// assert!(gpu.is_vram_dirty());
+    ///
+    /// gpu.clear_vram_dirty_flag();
+    /// assert!(!gpu.is_vram_dirty());
+    /// ```
+    #[inline(always)]
+    pub fn clear_vram_dirty_flag(&mut self) {
+        self.vram_dirty = false;
     }
 
     /// Update the rasterizer's clipping rectangle from the drawing area
@@ -673,6 +729,15 @@ impl GPU {
         let first_word = self.command_fifo[0];
         let command = (first_word >> 24) & 0xFF;
 
+        // Track if this command modifies VRAM (for dirty flag)
+        let is_drawing_command = matches!(command,
+            0x02 | // Fill
+            0x20..=0x3F | // Polygons (triangles, quads)
+            0x40..=0x5F | // Lines
+            0x60..=0x7F | // Rectangles
+            0xA0 // CPU→VRAM transfer
+        );
+
         match command {
             // Fill commands
             0x02 => self.gp0_fill_rectangle(),
@@ -768,6 +833,11 @@ impl GPU {
                 log::warn!("Unimplemented GP0 command: 0x{:02X}", command);
                 self.command_fifo.pop_front();
             }
+        }
+
+        // Mark VRAM as dirty if this was a drawing command
+        if is_drawing_command {
+            self.vram_dirty = true;
         }
     }
 
