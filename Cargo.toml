@@ -43,6 +43,15 @@ bitflags = "2.10"
 # Audio output (optional, not available in all environments)
 cpal = { version = "0.16", optional = true }
 
+# Frontend - Window and rendering
+winit = "0.30.12"
+wgpu = "27.0.1"
+bytemuck = { version = "1.24", features = ["derive"] }
+egui = "0.33.2"
+egui-wgpu = "0.33.2"
+egui-winit = "0.33.2"
+pollster = "0.4"
+
 [dev-dependencies]
 # Testing
 criterion = "0.7"
