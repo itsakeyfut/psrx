@@ -34,11 +34,11 @@ cargo test test_cpu_initialization
 # Run tests with output
 cargo test -- --nocapture
 
-# Run tests by xtask
-cargo x test
-
 # Run benchmarks
 cargo x bench
+
+# Run BIOS boot test
+cargo x bios-boot SCPH1001.BIN --instructions 100000
 ```
 
 ### Code Quality
@@ -53,8 +53,18 @@ cargo x check
 # Run clippy linter
 cargo x clippy
 
-# Check for warnings without building
-cargo x build 2>&1 | grep -E "(warning|error)"
+# Run all CI checks (fmt, clippy, build, test)
+cargo x ci
+```
+
+### Code Coverage
+
+```bash
+# Generate coverage report
+cargo llvm-cov --all-features --workspace --lcov --output-path lcov.info
+
+# Generate HTML report (view in browser)
+cargo llvm-cov --all-features --workspace --html
 ```
 
 ### Documentation
@@ -78,10 +88,16 @@ The emulator uses a **layered architecture** with clear separation of concerns:
    - GPU (CXD8561Q) - graphics processor with 1MB VRAM
    - SPU - sound processing unit
    - Memory Bus - unified memory access with region mapping
+   - DMA - direct memory access controller
+   - CD-ROM - disc drive
+   - Controller - input devices
+   - Timer - 3 timer/counter channels
+   - Interrupt Controller - IRQ management
+   - GTE - Geometry Transformation Engine
    - System - top-level coordinator
 
-2. **Frontend Layer** (`src/frontend/`): User interface (future)
-   - Slint-based UI
+2. **Frontend Layer** (`src/frontend/`): User interface (planned, not yet implemented)
+   - UI integration
    - Input handling
    - Configuration management
 
@@ -245,41 +261,49 @@ src/core/
 │   │   ├── branch.rs
 │   │   ├── load.rs
 │   │   └── ...
-│   └── tests.rs         # CPU tests
+│   └── tests/           # CPU tests
 ├── gpu/
-│   └── mod.rs           # GPU with VRAM, status, rendering state
+│   ├── mod.rs           # GPU core
+│   ├── gp0/            # GP0 drawing commands
+│   ├── gp1/            # GP1 control commands
+│   └── render/         # Rendering implementations
 ├── memory/
-│   └── mod.rs           # Memory bus with region routing
-├── error.rs             # Error types (EmulatorError, GpuError, etc.)
-└── system.rs            # System coordinator
+│   ├── mod.rs          # Memory bus
+│   ├── region.rs       # Memory region mapping
+│   └── cache.rs        # Cache emulation
+├── error.rs            # Error types (EmulatorError, GpuError, etc.)
+└── system.rs           # System coordinator
 ```
 
 ### Test Organization
 
-- **Unit tests**: In `#[cfg(test)] mod tests` within each module file
+- **Unit tests**: In `#[cfg(test)] mod tests` within each module file or dedicated tests directory per module
 - **Integration tests**: Would go in `tests/` directory (not yet created)
 - **Benchmarks**: In `benches/` directory
 
 ## Development Phase Context
 
-Currently in **Phase 2 (Week 5)**: GPU Core Structure implementation
+Currently in **Phase 2-3**: GPU, DMA, and peripheral implementation
 
 **Completed**:
 - Phase 1: CPU core with MIPS instruction set
 - Phase 1: Memory system with bus architecture
 - Phase 1: Basic System integration
-- Phase 2 Week 5: GPU core structure with VRAM management
+- Phase 2: GPU core structure with VRAM management
+- Phase 2: GPU drawing commands (GP0)
+- Phase 2: GPU control commands (GP1)
 
 **Current Focus**:
-- GPU drawing commands (GP0)
-- GPU control commands (GP1)
-- VRAM transfer operations
+- DMA controller
+- CD-ROM controller
+- Timer/Counter peripherals
+- Sound Processing Unit (SPU)
 
 **See**: `specs/05-development/roadmap.md` for full development timeline
 
 ## Spec Documentation
 
-The `specs/` directory contains comprehensive design documentation:
+The `specs/` directory contains comprehensive design documentation (in Japanese):
 
 - `specs/00-overview/architecture.md` - System architecture
 - `specs/01-design/` - Component design docs (CPU, GPU, Memory)
@@ -297,7 +321,7 @@ The `specs/` directory contains comprehensive design documentation:
 1. Add function in appropriate `src/core/cpu/instructions/*.rs`
 2. Follow naming: `pub fn op_<instruction>()`
 3. Add to dispatcher in `decode.rs`
-4. Write unit test in `tests.rs`
+4. Write unit test in `tests/`
 5. Update documentation if needed
 
 ### Adding GPU Functionality
@@ -331,9 +355,43 @@ When implementing an issue:
 4. Add requested tests
 5. Close with `Closes #<number>` in commit message
 
+## Configuration
+
+### Environment Variables
+
+PSRX supports configuration via environment variables using a `.env` file:
+
+**CPU Tracing:**
+```bash
+PSRX_TRACE_ENABLED=true      # Enable CPU instruction tracing
+PSRX_TRACE_LIMIT=10000       # Max instructions to trace (0 = unlimited)
+PSRX_TRACE_FILE=trace.log    # Output file for trace
+```
+
+**Logging:**
+```bash
+RUST_LOG=info                # Log level: error, warn, info, debug, trace
+```
+
+**Development Options:**
+```bash
+PSRX_VBLANK_ENABLED=false    # Enable VBLANK interrupts (experimental)
+PSRX_VBLANK_CYCLES=564480    # VBLANK frequency in CPU cycles
+```
+
+### Feature Flags
+
+```bash
+# Build without audio support (useful for CI)
+cargo build --no-default-features
+
+# Build with audio support (default)
+cargo build --features audio
+```
+
 ## Important Notes
 
-- **Comments and docs must be in English** (code was originally Japanese, being migrated)
+- **Comments and docs must be in English** (some spec docs are in Japanese, but code comments/docs should be English)
 - **BIOS files are NOT included** - users must provide their own
 - **Performance matters**: This is a real-time emulator targeting 60fps
 - **Accuracy matters**: Hardware behavior should match real PSX when practical
@@ -342,5 +400,6 @@ When implementing an issue:
 ## References
 
 - PSX-SPX: http://problemkaputt.de/psx-spx.htm (primary hardware reference)
+- PlayStation Specifications - psx-spx: https://psx-spx.consoledev.net/
 - No$ PSX specifications
 - DuckStation (modern PSX emulator) for implementation reference
