@@ -37,8 +37,10 @@
 
 pub mod app;
 pub mod frame_timer;
+pub mod input;
 pub mod renderer;
 
 pub use app::Application;
 pub use frame_timer::FrameTimer;
+pub use input::InputHandler;
 pub use renderer::RenderContext;
