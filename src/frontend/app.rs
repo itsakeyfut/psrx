@@ -95,11 +95,32 @@ impl Application {
             .as_mut()
             .ok_or("egui renderer not initialized")?;
 
-        // Get the next frame
-        let output = render_context
-            .surface
-            .get_current_texture()
-            .map_err(|e| format!("Failed to get surface texture: {}", e))?;
+        // Get the next frame, handling common surface errors gracefully
+        let output = match render_context.surface.get_current_texture() {
+            Ok(frame) => frame,
+            Err(wgpu::SurfaceError::Outdated | wgpu::SurfaceError::Lost) => {
+                // Reconfigure the surface to the current size and skip this frame
+                render_context.resize(
+                    render_context.surface_config.width,
+                    render_context.surface_config.height,
+                );
+                return Ok(());
+            }
+            Err(wgpu::SurfaceError::Timeout) => {
+                // Non-fatal; skip this frame
+                log::warn!("Surface timeout while acquiring frame");
+                return Ok(());
+            }
+            Err(wgpu::SurfaceError::OutOfMemory) => {
+                // Treat as fatal and propagate up
+                return Err("Surface out of memory while acquiring frame".to_string());
+            }
+            Err(e) => {
+                // Catch-all for any other surface error (e.g. `Other`)
+                log::error!("Unexpected surface error: {:?}", e);
+                return Err(format!("Failed to get surface texture: {:?}", e));
+            }
+        };
 
         let view = output
             .texture

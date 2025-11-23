@@ -20,12 +20,28 @@ Complete the implementation workflow:
    ```
    Check the diff size. If over 100 lines, consider splitting into multiple PRs.
 
-3. **Move to appropriate working branch** (if not already):
-   Determine the correct branch based on the changes.
-   If needed, create a feature branch:
+3. **MANDATORY: Verify and move to working branch:**
+
+   **CRITICAL**: NEVER commit directly to `main` or `develop` branch!
+
    ```bash
-   git checkout -b feature/issue-XXX
+   # Check current branch
+   git branch --show-current
    ```
+
+   **If currently on `main` or `develop`:**
+   - STOP and create/switch to a feature branch first
+   - Example: `git checkout -b feat/issue-XXX` or `git checkout existing-branch`
+
+   **If already on a feature branch:**
+   - Verify the branch name is correct
+   - Proceed to next step
+
+   **Branch naming convention:**
+   - `feat/<description>` for features
+   - `fix/<description>` for bug fixes
+   - `refactor/<description>` for refactoring
+   - `docs/<description>` for documentation
 
 4. **Run quality checks:**
    ```bash
@@ -59,10 +75,21 @@ Complete the implementation workflow:
    ```
 
 **PR Guidelines:**
-- Keep PR concise (target: under 100 lines)
-- Clear title following conventional commits
-- Summarize changes in 2-3 bullet points
-- Reference related issue with "Closes #X"
-- Include test plan if applicable
+
+**MANDATORY PR Body Limit: MAXIMUM 100 LINES**
+
+- **Keep PR body concise** - MUST be under 100 lines
+- Use clear, concise language
+- Include only essential information:
+  - Brief summary (2-4 sentences)
+  - Key changes (3-5 bullet points)
+  - Test plan (brief checklist)
+  - "Closes #XXX" reference
+- Avoid verbose descriptions, excessive formatting, or redundant information
+- If more details are needed, add them as issue comments instead
+
+**PR Title:**
+- Follow conventional commits format
+- Example: `feat(component): brief description`
 
 Please proceed with these steps.
