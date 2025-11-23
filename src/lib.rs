@@ -44,9 +44,10 @@
 //!
 //! - [`core::cpu`]: MIPS R3000A CPU emulation
 //! - [`core::memory`]: Memory bus and address translation
-//! - [`core::gpu`]: Graphics processing unit (stub, Phase 2)
-//! - [`core::spu`]: Sound processing unit (stub, Phase 4)
+//! - [`core::gpu`]: Graphics processing unit
+//! - [`core::spu`]: Sound processing unit
 //! - [`core::system`]: System integration and main loop
+//! - [`frontend`]: User interface and window management
 //!
 //! # Error Handling
 //!
@@ -54,6 +55,7 @@
 //! `Result<T, EmulatorError>`.
 
 pub mod core;
+pub mod frontend;
 
 // Re-export commonly used types
 pub use core::error::{EmulatorError, Result};
