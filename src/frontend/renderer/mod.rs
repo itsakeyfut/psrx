@@ -19,5 +19,9 @@
 //! including wgpu context management and rendering operations.
 
 pub mod context;
+pub mod display_renderer;
+pub mod vram_texture;
 
 pub use context::RenderContext;
+pub use display_renderer::DisplayRenderer;
+pub use vram_texture::{convert_rgb15_to_rgba8, VramTexture};

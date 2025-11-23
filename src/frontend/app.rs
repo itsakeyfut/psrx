@@ -18,7 +18,8 @@
 //! This module provides the main application struct that manages the window,
 //! event loop, rendering context, and UI.
 
-use crate::frontend::renderer::RenderContext;
+use crate::core::gpu::DisplayArea;
+use crate::frontend::renderer::{DisplayRenderer, RenderContext};
 use std::sync::Arc;
 use winit::{
     application::ApplicationHandler,
@@ -42,6 +43,10 @@ pub struct Application {
     egui_state: Option<egui_winit::State>,
     /// egui-wgpu renderer
     egui_renderer: Option<egui_wgpu::Renderer>,
+    /// Display renderer for VRAM
+    display_renderer: Option<DisplayRenderer>,
+    /// Test VRAM data (will be replaced with GPU integration in future phases)
+    test_vram: Vec<u16>,
 }
 
 impl Application {
@@ -64,12 +69,49 @@ impl Application {
     pub fn new() -> Self {
         let egui_ctx = egui::Context::default();
 
+        // Create test VRAM with a simple pattern (for demonstration)
+        let mut test_vram = vec![0u16; 1024 * 512];
+
+        // Draw a white rectangle (100x100) at position (50, 50)
+        for y in 50..150 {
+            for x in 50..150 {
+                let index = y * 1024 + x;
+                test_vram[index] = 0x7FFF; // White in RGB15
+            }
+        }
+
+        // Draw a red rectangle (80x80) at position (200, 100)
+        for y in 100..180 {
+            for x in 200..280 {
+                let index = y * 1024 + x;
+                test_vram[index] = 0x001F; // Red in RGB15
+            }
+        }
+
+        // Draw a green rectangle (60x60) at position (100, 200)
+        for y in 200..260 {
+            for x in 100..160 {
+                let index = y * 1024 + x;
+                test_vram[index] = 0x03E0; // Green in RGB15
+            }
+        }
+
+        // Draw a blue rectangle (50x50) at position (250, 180)
+        for y in 180..230 {
+            for x in 250..300 {
+                let index = y * 1024 + x;
+                test_vram[index] = 0x7C00; // Blue in RGB15
+            }
+        }
+
         Self {
             window: None,
             render_context: None,
             egui_ctx,
             egui_state: None,
             egui_renderer: None,
+            display_renderer: None,
+            test_vram,
         }
     }
 
@@ -77,9 +119,10 @@ impl Application {
     ///
     /// This method handles:
     /// 1. Getting the next surface texture
-    /// 2. Running the egui UI code
-    /// 3. Rendering egui to the surface
-    /// 4. Presenting the frame
+    /// 2. Rendering VRAM display
+    /// 3. Running the egui UI code
+    /// 4. Rendering egui to the surface
+    /// 5. Presenting the frame
     fn render(&mut self) -> Result<(), String> {
         let window = self.window.as_ref().ok_or("Window not initialized")?;
         let render_context = self
@@ -94,6 +137,10 @@ impl Application {
             .egui_renderer
             .as_mut()
             .ok_or("egui renderer not initialized")?;
+        let display_renderer = self
+            .display_renderer
+            .as_mut()
+            .ok_or("Display renderer not initialized")?;
 
         // Get the next frame, handling common surface errors gracefully
         let output = match render_context.surface.get_current_texture() {
@@ -192,6 +239,18 @@ impl Application {
                     label: Some("Render Encoder"),
                 });
 
+        // Render VRAM display first (clears to black and draws VRAM)
+        let display_area = DisplayArea::default(); // Use default 320x240 display area
+        display_renderer.render(
+            &mut encoder,
+            &view,
+            &self.test_vram,
+            &display_area,
+            &render_context.device,
+            &render_context.queue,
+        );
+
+        // Update egui buffers
         egui_renderer.update_buffers(
             &render_context.device,
             &render_context.queue,
@@ -200,14 +259,15 @@ impl Application {
             &screen_descriptor,
         );
 
+        // Render egui on top of VRAM display
         {
             let render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("Render Pass"),
+                label: Some("egui Render Pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                     view: &view,
                     resolve_target: None,
                     ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                        load: wgpu::LoadOp::Load, // Load existing VRAM display
                         store: wgpu::StoreOp::Store,
                     },
                     depth_slice: None,
@@ -283,10 +343,15 @@ impl ApplicationHandler for Application {
                 egui_wgpu::RendererOptions::default(),
             );
 
+            // Initialize display renderer
+            let display_renderer =
+                DisplayRenderer::new(&render_context.device, render_context.surface_config.format);
+
             self.window = Some(window);
             self.render_context = Some(render_context);
             self.egui_state = Some(egui_state);
             self.egui_renderer = Some(egui_renderer);
+            self.display_renderer = Some(display_renderer);
 
             log::info!("Application initialized successfully");
         }
