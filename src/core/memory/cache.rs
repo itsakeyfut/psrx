@@ -479,13 +479,13 @@ mod tests {
         let ram = bus.ram_mut();
 
         // Write a pattern
-        for i in 0..100 {
-            ram[i] = (i % 256) as u8;
+        for (i, item) in ram.iter_mut().enumerate().take(100) {
+            *item = (i % 256) as u8;
         }
 
         // Verify pattern
-        for i in 0..100 {
-            assert_eq!(ram[i], (i % 256) as u8);
+        for (i, item) in ram.iter().enumerate().take(100) {
+            assert_eq!(*item, (i % 256) as u8);
         }
     }
 

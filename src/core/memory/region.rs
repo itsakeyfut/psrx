@@ -41,6 +41,77 @@ pub enum MemoryRegion {
     Unmapped,
 }
 
+impl Bus {
+    /// Translate virtual address to physical address
+    ///
+    /// The PlayStation 1 uses MIPS memory segments:
+    /// - KUSEG (0x00000000-0x7FFFFFFF): User space, cached
+    /// - KSEG0 (0x80000000-0x9FFFFFFF): Kernel space, cached (mirrors physical memory)
+    /// - KSEG1 (0xA0000000-0xBFFFFFFF): Kernel space, uncached (mirrors physical memory)
+    ///
+    /// # Arguments
+    ///
+    /// * `vaddr` - Virtual address to translate
+    ///
+    /// # Returns
+    ///
+    /// Physical address (with upper 3 bits masked off)
+    pub(super) fn translate_address(&self, vaddr: u32) -> u32 {
+        // Mask upper 3 bits to get physical address
+        // This handles KUSEG, KSEG0, and KSEG1 all at once
+        vaddr & 0x1FFF_FFFF
+    }
+
+    /// Identify memory region for an address
+    ///
+    /// Determines which memory region (RAM, Scratchpad, I/O, BIOS, or Unmapped)
+    /// a given virtual address belongs to.
+    ///
+    /// # Arguments
+    ///
+    /// * `vaddr` - Virtual address
+    ///
+    /// # Returns
+    ///
+    /// The memory region that contains this address
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use psrx::core::memory::{Bus, MemoryRegion};
+    ///
+    /// let bus = Bus::new();
+    ///
+    /// assert_eq!(bus.identify_region(0x00000000), MemoryRegion::RAM);
+    /// assert_eq!(bus.identify_region(0x1F800000), MemoryRegion::Scratchpad);
+    /// assert_eq!(bus.identify_region(0x1F801000), MemoryRegion::IO);
+    /// assert_eq!(bus.identify_region(0xBFC00000), MemoryRegion::BIOS);
+    /// assert_eq!(bus.identify_region(0x1FFFFFFF), MemoryRegion::Unmapped);
+    /// ```
+    pub fn identify_region(&self, vaddr: u32) -> MemoryRegion {
+        let paddr = self.translate_address(vaddr);
+
+        if (Self::RAM_START..=Self::RAM_END).contains(&paddr) {
+            MemoryRegion::RAM
+        } else if (Self::EXP1_LOW_START..=Self::EXP1_LOW_END).contains(&paddr)
+            || (Self::EXP2_START..=Self::EXP2_END).contains(&paddr)
+            || (Self::EXP3_START..=Self::EXP3_END).contains(&paddr)
+        {
+            MemoryRegion::Expansion
+        } else if (Self::SCRATCHPAD_START..=Self::SCRATCHPAD_END).contains(&paddr) {
+            MemoryRegion::Scratchpad
+        } else if (Self::IO_START..=Self::IO_END).contains(&paddr) {
+            MemoryRegion::IO
+        } else if (Self::BIOS_START..=Self::BIOS_END).contains(&paddr) {
+            MemoryRegion::BIOS
+        } else if paddr == Self::CACHE_CONTROL {
+            MemoryRegion::CacheControl
+        } else {
+            MemoryRegion::Unmapped
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -101,7 +172,7 @@ mod tests {
 
         // All three segments should map to same physical address
         let phys_addr = 0x00010000;
-        assert_eq!(bus.translate_address(0x00000000 | phys_addr), phys_addr);
+        assert_eq!(bus.translate_address(phys_addr), phys_addr);
         assert_eq!(bus.translate_address(0x80000000 | phys_addr), phys_addr);
         assert_eq!(bus.translate_address(0xA0000000 | phys_addr), phys_addr);
     }
@@ -143,34 +214,16 @@ mod tests {
         let bus = Bus::new();
 
         // Scratchpad: 0x1F800000-0x1F800FFF (4KB addressable, 1KB physical)
-        assert_eq!(
-            bus.identify_region(0x1F800000),
-            MemoryRegion::Scratchpad
-        );
-        assert_eq!(
-            bus.identify_region(0x1F8003FF),
-            MemoryRegion::Scratchpad
-        );
-        assert_eq!(
-            bus.identify_region(0x1F800400),
-            MemoryRegion::Scratchpad
-        );
-        assert_eq!(
-            bus.identify_region(0x1F800FFF),
-            MemoryRegion::Scratchpad
-        );
+        assert_eq!(bus.identify_region(0x1F800000), MemoryRegion::Scratchpad);
+        assert_eq!(bus.identify_region(0x1F8003FF), MemoryRegion::Scratchpad);
+        assert_eq!(bus.identify_region(0x1F800400), MemoryRegion::Scratchpad);
+        assert_eq!(bus.identify_region(0x1F800FFF), MemoryRegion::Scratchpad);
 
         // Test with KSEG0
-        assert_eq!(
-            bus.identify_region(0x9F800000),
-            MemoryRegion::Scratchpad
-        );
+        assert_eq!(bus.identify_region(0x9F800000), MemoryRegion::Scratchpad);
 
         // Test with KSEG1
-        assert_eq!(
-            bus.identify_region(0xBF800000),
-            MemoryRegion::Scratchpad
-        );
+        assert_eq!(bus.identify_region(0xBF800000), MemoryRegion::Scratchpad);
     }
 
     #[test]
@@ -214,10 +267,7 @@ mod tests {
         let bus = Bus::new();
 
         // Cache Control: 0xFFFE0130
-        assert_eq!(
-            bus.identify_region(0xFFFE0130),
-            MemoryRegion::CacheControl
-        );
+        assert_eq!(bus.identify_region(0xFFFE0130), MemoryRegion::CacheControl);
     }
 
     #[test]
@@ -279,16 +329,10 @@ mod tests {
             assert_eq!(bus.identify_region(phys_addr), expected_region);
 
             // KSEG0
-            assert_eq!(
-                bus.identify_region(0x80000000 | phys_addr),
-                expected_region
-            );
+            assert_eq!(bus.identify_region(0x80000000 | phys_addr), expected_region);
 
             // KSEG1
-            assert_eq!(
-                bus.identify_region(0xA0000000 | phys_addr),
-                expected_region
-            );
+            assert_eq!(bus.identify_region(0xA0000000 | phys_addr), expected_region);
         }
     }
 
@@ -311,10 +355,7 @@ mod tests {
         assert_eq!(bus.identify_region(0x1F7FFFFF), MemoryRegion::Expansion);
         assert_eq!(bus.identify_region(0x1F800000), MemoryRegion::Scratchpad);
 
-        assert_eq!(
-            bus.identify_region(0x1F800FFF),
-            MemoryRegion::Scratchpad
-        );
+        assert_eq!(bus.identify_region(0x1F800FFF), MemoryRegion::Scratchpad);
         assert_eq!(bus.identify_region(0x1F801000), MemoryRegion::IO);
 
         assert_eq!(bus.identify_region(0x1F9FFFFF), MemoryRegion::IO);
@@ -400,77 +441,6 @@ mod tests {
                 "Address 0x{:08X} should be Scratchpad",
                 addr
             );
-        }
-    }
-}
-
-impl Bus {
-    /// Translate virtual address to physical address
-    ///
-    /// The PlayStation 1 uses MIPS memory segments:
-    /// - KUSEG (0x00000000-0x7FFFFFFF): User space, cached
-    /// - KSEG0 (0x80000000-0x9FFFFFFF): Kernel space, cached (mirrors physical memory)
-    /// - KSEG1 (0xA0000000-0xBFFFFFFF): Kernel space, uncached (mirrors physical memory)
-    ///
-    /// # Arguments
-    ///
-    /// * `vaddr` - Virtual address to translate
-    ///
-    /// # Returns
-    ///
-    /// Physical address (with upper 3 bits masked off)
-    pub(super) fn translate_address(&self, vaddr: u32) -> u32 {
-        // Mask upper 3 bits to get physical address
-        // This handles KUSEG, KSEG0, and KSEG1 all at once
-        vaddr & 0x1FFF_FFFF
-    }
-
-    /// Identify memory region for an address
-    ///
-    /// Determines which memory region (RAM, Scratchpad, I/O, BIOS, or Unmapped)
-    /// a given virtual address belongs to.
-    ///
-    /// # Arguments
-    ///
-    /// * `vaddr` - Virtual address
-    ///
-    /// # Returns
-    ///
-    /// The memory region that contains this address
-    ///
-    /// # Example
-    ///
-    /// ```
-    /// use psrx::core::memory::{Bus, MemoryRegion};
-    ///
-    /// let bus = Bus::new();
-    ///
-    /// assert_eq!(bus.identify_region(0x00000000), MemoryRegion::RAM);
-    /// assert_eq!(bus.identify_region(0x1F800000), MemoryRegion::Scratchpad);
-    /// assert_eq!(bus.identify_region(0x1F801000), MemoryRegion::IO);
-    /// assert_eq!(bus.identify_region(0xBFC00000), MemoryRegion::BIOS);
-    /// assert_eq!(bus.identify_region(0x1FFFFFFF), MemoryRegion::Unmapped);
-    /// ```
-    pub fn identify_region(&self, vaddr: u32) -> MemoryRegion {
-        let paddr = self.translate_address(vaddr);
-
-        if (Self::RAM_START..=Self::RAM_END).contains(&paddr) {
-            MemoryRegion::RAM
-        } else if (Self::EXP1_LOW_START..=Self::EXP1_LOW_END).contains(&paddr)
-            || (Self::EXP2_START..=Self::EXP2_END).contains(&paddr)
-            || (Self::EXP3_START..=Self::EXP3_END).contains(&paddr)
-        {
-            MemoryRegion::Expansion
-        } else if (Self::SCRATCHPAD_START..=Self::SCRATCHPAD_END).contains(&paddr) {
-            MemoryRegion::Scratchpad
-        } else if (Self::IO_START..=Self::IO_END).contains(&paddr) {
-            MemoryRegion::IO
-        } else if (Self::BIOS_START..=Self::BIOS_END).contains(&paddr) {
-            MemoryRegion::BIOS
-        } else if paddr == Self::CACHE_CONTROL {
-            MemoryRegion::CacheControl
-        } else {
-            MemoryRegion::Unmapped
         }
     }
 }
