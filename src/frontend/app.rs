@@ -20,6 +20,7 @@
 
 use crate::core::system::System;
 use crate::frontend::frame_timer::FrameTimer;
+use crate::frontend::input::InputHandler;
 use crate::frontend::renderer::{DisplayRenderer, RenderContext};
 use std::sync::Arc;
 use winit::{
@@ -55,6 +56,10 @@ pub struct Application {
     paused: bool,
     /// BIOS file path
     bios_path: String,
+    /// Input handler for keyboard/gamepad
+    input_handler: InputHandler,
+    /// Show input configuration UI
+    show_input_config: bool,
 }
 
 impl Application {
@@ -80,6 +85,7 @@ impl Application {
     /// ```
     pub fn new(bios_path: &str) -> Self {
         let egui_ctx = egui::Context::default();
+        let input_handler = InputHandler::new();
 
         Self {
             window: None,
@@ -92,6 +98,8 @@ impl Application {
             frame_timer: FrameTimer::new(60),
             paused: false,
             bios_path: bios_path.to_string(),
+            input_handler,
+            show_input_config: false,
         }
     }
 
@@ -160,6 +168,27 @@ impl Application {
         }
     }
 
+    /// Toggle fullscreen mode
+    ///
+    /// Switches between windowed and fullscreen mode.
+    pub fn toggle_fullscreen(&mut self) {
+        if let Some(window) = &self.window {
+            let is_fullscreen = window.fullscreen().is_some();
+            if is_fullscreen {
+                window.set_fullscreen(None);
+                log::info!("Switched to windowed mode");
+            } else {
+                window.set_fullscreen(Some(winit::window::Fullscreen::Borderless(None)));
+                log::info!("Switched to fullscreen mode");
+            }
+        }
+    }
+
+    /// Toggle input configuration UI
+    pub fn toggle_input_config(&mut self) {
+        self.show_input_config = !self.show_input_config;
+    }
+
     /// Render a frame
     ///
     /// This method handles:
@@ -226,6 +255,12 @@ impl Application {
         let frame_time_ms = self.frame_timer.frame_time_ms();
         let frame_count = self.frame_timer.frame_count();
 
+        let show_input_config = self.show_input_config;
+        let input_handler = &self.input_handler;
+
+        // Track if we need to toggle input config
+        let mut should_toggle_input_config = false;
+
         let full_output = self.egui_ctx.run(raw_input, |ctx| {
             // Create a simple UI panel
             egui::CentralPanel::default().show(ctx, |ui| {
@@ -257,6 +292,15 @@ impl Application {
                 ui.label("Space: Pause/Resume");
                 ui.label("F10: Step Frame (when paused)");
                 ui.label("F5: Reset");
+                ui.label("F11: Toggle Fullscreen");
+                ui.label("F12: Screenshot (not yet implemented)");
+
+                ui.separator();
+
+                // Input configuration button
+                if ui.button("Configure Input").clicked() {
+                    should_toggle_input_config = true;
+                }
 
                 // Add some debug info
                 ui.separator();
@@ -275,7 +319,67 @@ impl Application {
                     ));
                 });
             });
+
+            // Input configuration window
+            if show_input_config {
+                egui::Window::new("Input Configuration")
+                    .default_width(400.0)
+                    .show(ctx, |ui| {
+                        ui.heading("Keyboard Mapping");
+                        ui.label("PSX controller button mappings:");
+                        ui.separator();
+
+                        // Show all button mappings
+                        let mappings = input_handler.get_button_mappings();
+                        for (button_name, keys) in mappings {
+                            ui.horizontal(|ui| {
+                                ui.label(format!("{:12}", button_name));
+                                ui.label("→");
+                                let keys_str = keys
+                                    .iter()
+                                    .map(|k| format!("{:?}", k))
+                                    .collect::<Vec<_>>()
+                                    .join(", ");
+                                ui.label(keys_str);
+                            });
+                        }
+
+                        ui.separator();
+
+                        // Show conflicts if any
+                        let conflicts = input_handler.detect_conflicts();
+                        if !conflicts.is_empty() {
+                            ui.colored_label(
+                                egui::Color32::YELLOW,
+                                format!(
+                                    "Note: {} buttons have multiple keys mapped",
+                                    conflicts.len()
+                                ),
+                            );
+                            ui.label("This is normal and allows flexibility in controls.");
+                        }
+
+                        ui.separator();
+
+                        ui.label("Configuration file:");
+                        ui.label(input_handler.config_path());
+
+                        ui.separator();
+
+                        if ui.button("Close").clicked() {
+                            should_toggle_input_config = true;
+                        }
+
+                        ui.separator();
+                        ui.label("To customize key bindings, edit the input.toml file.");
+                    });
+            }
         });
+
+        // Handle deferred actions
+        if should_toggle_input_config {
+            self.show_input_config = !self.show_input_config;
+        }
 
         // Handle platform output (e.g., cursor changes)
         egui_state.handle_platform_output(window, full_output.platform_output);
@@ -477,20 +581,47 @@ impl ApplicationHandler for Application {
                 }
             }
             WindowEvent::KeyboardInput { event, .. } => {
-                // Handle keyboard shortcuts
-                if event.state.is_pressed() {
-                    if let PhysicalKey::Code(key_code) = event.physical_key {
+                if let PhysicalKey::Code(key_code) = event.physical_key {
+                    let pressed = event.state.is_pressed();
+
+                    // Handle hotkeys first (only on press)
+                    if pressed {
                         match key_code {
                             KeyCode::Space => {
                                 self.toggle_pause();
+                                return; // Don't pass to controller
                             }
                             KeyCode::F10 => {
                                 self.step_frame();
+                                return;
                             }
                             KeyCode::F5 => {
                                 self.reset();
+                                return;
+                            }
+                            KeyCode::F11 => {
+                                self.toggle_fullscreen();
+                                return;
+                            }
+                            KeyCode::F12 => {
+                                // TODO: Screenshot functionality (Phase 6)
+                                log::info!("Screenshot hotkey pressed (not yet implemented)");
+                                return;
                             }
                             _ => {}
+                        }
+                    }
+
+                    // Handle controller input
+                    if let Some((button, pressed)) =
+                        self.input_handler.handle_keyboard(key_code, pressed)
+                    {
+                        if let Some(ref system) = self.system {
+                            let controller_ports = system.controller_ports();
+                            let mut ports = controller_ports.borrow_mut();
+                            if let Some(controller) = ports.get_controller_mut(0) {
+                                controller.set_button_state(button, pressed);
+                            }
                         }
                     }
                 }
