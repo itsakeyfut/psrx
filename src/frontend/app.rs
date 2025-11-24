@@ -63,6 +63,8 @@ pub struct Application {
     show_input_config: bool,
     /// UI state manager
     ui_state: UiState,
+    /// Exit requested flag
+    exit_requested: bool,
 }
 
 impl Application {
@@ -104,6 +106,7 @@ impl Application {
             input_handler,
             show_input_config: false,
             ui_state: UiState::new(),
+            exit_requested: false,
         }
     }
 
@@ -218,10 +221,8 @@ impl Application {
                 self.open_disc_dialog();
             }
             UiAction::Exit => {
-                // Exit will be handled in the event loop
-                if let Some(window) = &self.window {
-                    window.set_minimized(true);
-                }
+                // Set exit flag - will be handled in the event loop
+                self.exit_requested = true;
                 log::info!("Exit requested from UI");
             }
             UiAction::EnableCpuTracing => {
@@ -683,6 +684,12 @@ impl ApplicationHandler for Application {
                 }
             }
             _ => {}
+        }
+
+        // Check if exit was requested from UI
+        if self.exit_requested {
+            log::info!("Exiting application");
+            event_loop.exit();
         }
     }
 

@@ -45,7 +45,7 @@ pub fn render_cpu_panel(ctx: &egui::Context, system: &System) {
             ui.heading("Registers");
             egui::Grid::new("cpu_registers")
                 .striped(true)
-                .num_columns(2)
+                .num_columns(4)
                 .show(ui, |ui| {
                     for i in 0..16 {
                         // Left column (r0-r15)
