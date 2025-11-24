@@ -327,11 +327,7 @@ mod tests {
 
         cpu.op_mult(1, 2).unwrap();
 
-        assert_eq!(
-            cpu.lo,
-            (-200i32) as u32,
-            "MULT: -10 * 20 should give -200"
-        );
+        assert_eq!(cpu.lo, (-200i32) as u32, "MULT: -10 * 20 should give -200");
         assert_eq!(cpu.hi, 0xFFFFFFFF, "MULT: negative result, HI should be -1");
     }
 
@@ -450,13 +446,11 @@ mod tests {
 
         // 0xFFFFFFFF * 0xFFFFFFFF = 0xFFFFFFFE00000001
         assert_eq!(
-            cpu.lo,
-            0x00000001,
+            cpu.lo, 0x00000001,
             "MULTU: max * max should give LO=0x00000001"
         );
         assert_eq!(
-            cpu.hi,
-            0xFFFFFFFE,
+            cpu.hi, 0xFFFFFFFE,
             "MULTU: max * max should give HI=0xFFFFFFFE"
         );
     }
@@ -590,8 +584,7 @@ mod tests {
 
         // PSX-SPX: division by zero gives LO=0xFFFFFFFF (if positive), HI=numerator
         assert_eq!(
-            cpu.lo,
-            0xFFFFFFFF,
+            cpu.lo, 0xFFFFFFFF,
             "DIV: positive / 0 should give LO=0xFFFFFFFF"
         );
         assert_eq!(cpu.hi, 100, "DIV: division by 0 should leave HI=numerator");
@@ -624,8 +617,7 @@ mod tests {
 
         // PSX-SPX: i32::MIN / -1 overflow gives LO=i32::MIN, HI=0
         assert_eq!(
-            cpu.lo,
-            0x80000000,
+            cpu.lo, 0x80000000,
             "DIV: i32::MIN / -1 should give LO=i32::MIN"
         );
         assert_eq!(cpu.hi, 0, "DIV: overflow should give HI=0");
@@ -678,8 +670,7 @@ mod tests {
         cpu.op_divu(1, 2).unwrap();
 
         assert_eq!(
-            cpu.lo,
-            0x7FFFFFFF,
+            cpu.lo, 0x7FFFFFFF,
             "DIVU: 0xFFFFFFFF / 2 should give 0x7FFFFFFF"
         );
         assert_eq!(cpu.hi, 1, "DIVU: 0xFFFFFFFF % 2 should give remainder 1");
@@ -695,14 +686,10 @@ mod tests {
 
         // PSX-SPX: unsigned division by zero gives LO=0xFFFFFFFF, HI=numerator
         assert_eq!(
-            cpu.lo,
-            0xFFFFFFFF,
+            cpu.lo, 0xFFFFFFFF,
             "DIVU: division by 0 should give LO=0xFFFFFFFF"
         );
-        assert_eq!(
-            cpu.hi, 100,
-            "DIVU: division by 0 should leave HI=numerator"
-        );
+        assert_eq!(cpu.hi, 100, "DIVU: division by 0 should leave HI=numerator");
     }
 
     #[test]

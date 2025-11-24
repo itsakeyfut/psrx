@@ -162,8 +162,7 @@ mod tests {
             "J: should preserve upper 4 bits of PC"
         );
         assert_eq!(
-            cpu.next_pc,
-            0xAFFFFFFC,
+            cpu.next_pc, 0xAFFFFFFC,
             "J: full address check with preserved upper bits"
         );
     }
@@ -179,8 +178,7 @@ mod tests {
         cpu.op_j(instruction).unwrap();
 
         assert_eq!(
-            cpu.next_pc,
-            0xB0000000,
+            cpu.next_pc, 0xB0000000,
             "J: jump to 0 should go to region base"
         );
     }
@@ -196,8 +194,7 @@ mod tests {
         cpu.op_j(instruction).unwrap();
 
         assert_eq!(
-            cpu.next_pc,
-            0x0FFFFFFC,
+            cpu.next_pc, 0x0FFFFFFC,
             "J: should handle max target in region"
         );
     }
@@ -304,8 +301,7 @@ mod tests {
         cpu.op_jr(31).unwrap();
 
         assert_eq!(
-            cpu.next_pc,
-            0xBFC00100,
+            cpu.next_pc, 0xBFC00100,
             "JR: should return to saved address"
         );
     }
@@ -326,23 +322,16 @@ mod tests {
 
         // JR can jump to any 32-bit address (unlike J which uses 28 bits)
         let target_addresses = [
-            0x00000000,
-            0x80000000,
-            0xA0000000,
-            0xBFC00000,
-            0xFFFFFFFC,
-            0x12345678,
+            0x00000000, 0x80000000, 0xA0000000, 0xBFC00000, 0xFFFFFFFC, 0x12345678,
         ];
 
         for (i, &addr) in target_addresses.iter().enumerate() {
             cpu.set_reg(10, addr);
             cpu.op_jr(10).unwrap();
             assert_eq!(
-                cpu.next_pc,
-                addr,
+                cpu.next_pc, addr,
                 "JR test {}: should jump to 0x{:08X}",
-                i,
-                addr
+                i, addr
             );
         }
     }
@@ -399,8 +388,7 @@ mod tests {
         // The return address is saved to r5, overwriting the original value
         // Then the jump address is read from r5 (which now has the return address)
         assert_eq!(
-            cpu.next_pc,
-            0x80000004,
+            cpu.next_pc, 0x80000004,
             "JALR: current implementation writes rd before reading rs"
         );
         assert_eq!(
@@ -500,10 +488,7 @@ mod tests {
         cpu.next_pc = function_addr + 4;
         cpu.op_jr(31).unwrap();
 
-        assert_eq!(
-            cpu.next_pc, return_addr,
-            "JR r31 should return to caller"
-        );
+        assert_eq!(cpu.next_pc, return_addr, "JR r31 should return to caller");
     }
 
     #[test]
@@ -521,8 +506,7 @@ mod tests {
         cpu.set_reg(5, 0x80000001); // Misaligned address
         cpu.op_jr(5).unwrap();
         assert_eq!(
-            cpu.next_pc,
-            0x80000001,
+            cpu.next_pc, 0x80000001,
             "JR can set misaligned address (exception happens on execution)"
         );
     }

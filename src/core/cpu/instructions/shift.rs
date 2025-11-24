@@ -208,11 +208,7 @@ mod tests {
 
         cpu.op_sll(1, 2, 31).unwrap();
 
-        assert_eq!(
-            cpu.reg(2),
-            0x80000000,
-            "SLL: max shift should shift to MSB"
-        );
+        assert_eq!(cpu.reg(2), 0x80000000, "SLL: max shift should shift to MSB");
     }
 
     #[test]

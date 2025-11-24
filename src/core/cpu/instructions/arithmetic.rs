@@ -522,11 +522,7 @@ mod tests {
         let instruction = 0x2422FFFF;
         cpu.op_addiu(instruction).unwrap();
 
-        assert_eq!(
-            cpu.reg(2),
-            0xFFFFFFFF,
-            "ADDIU should sign-extend immediate"
-        );
+        assert_eq!(cpu.reg(2), 0xFFFFFFFF, "ADDIU should sign-extend immediate");
     }
 
     // ========== SUB Tests ==========

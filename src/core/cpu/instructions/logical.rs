@@ -413,7 +413,11 @@ mod tests {
 
         cpu.op_or(1, 2, 3).unwrap();
 
-        assert_eq!(cpu.reg(3), 0xFFFFFFFF, "OR with all 1s should return all 1s");
+        assert_eq!(
+            cpu.reg(3),
+            0xFFFFFFFF,
+            "OR with all 1s should return all 1s"
+        );
     }
 
     // ========== ORI Tests ==========

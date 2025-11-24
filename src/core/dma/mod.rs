@@ -762,12 +762,7 @@ mod tests {
                 "Channel {} should be inactive after init",
                 ch
             );
-            assert_eq!(
-                dma.read_madr(ch),
-                0,
-                "Channel {} MADR should be 0",
-                ch
-            );
+            assert_eq!(dma.read_madr(ch), 0, "Channel {} MADR should be 0", ch);
             assert_eq!(dma.read_bcr(ch), 0, "Channel {} BCR should be 0", ch);
             assert_eq!(dma.read_chcr(ch), 0, "Channel {} CHCR should be 0", ch);
         }
@@ -829,10 +824,7 @@ mod tests {
         let block_count = (bcr >> 16) & 0xFFFF;
 
         assert_eq!(block_size, 0x0020, "Block size should be lower 16 bits");
-        assert_eq!(
-            block_count, 0x0010,
-            "Block count should be upper 16 bits"
-        );
+        assert_eq!(block_count, 0x0010, "Block count should be upper 16 bits");
     }
 
     // ========== CHCR Register Tests ==========
@@ -1143,7 +1135,7 @@ mod tests {
 
     #[test]
     fn test_channel_priority_ordering() {
-        let mut dma = create_test_dma();
+        let dma = create_test_dma();
 
         // Default: 0x07654321 means priority 7,6,5,4,3,2,1 for channels 6,5,4,3,2,1,0
         let priorities: Vec<u32> = (0..7).map(|ch| dma.channel_priority(ch)).collect();

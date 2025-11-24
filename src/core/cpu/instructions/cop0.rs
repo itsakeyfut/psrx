@@ -232,8 +232,7 @@ mod tests {
             cpu.op_mtc0(instruction).unwrap();
 
             assert_eq!(
-                cpu.cop0.regs[rd],
-                test_value,
+                cpu.cop0.regs[rd], test_value,
                 "MTC0: should write COP0 register {} correctly",
                 rd
             );

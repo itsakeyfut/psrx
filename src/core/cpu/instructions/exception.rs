@@ -128,11 +128,7 @@ mod tests {
 
         // IEc should be cleared (interrupts disabled)
         let sr = cpu.cop0.regs[COP0::SR];
-        assert_eq!(
-            sr & 0x01,
-            0,
-            "SYSCALL should disable interrupts (IEc=0)"
-        );
+        assert_eq!(sr & 0x01, 0, "SYSCALL should disable interrupts (IEc=0)");
     }
 
     #[test]
@@ -169,8 +165,7 @@ mod tests {
 
         // PC should be set to exception vector
         assert_eq!(
-            cpu.pc,
-            0x80000080,
+            cpu.pc, 0x80000080,
             "SYSCALL should jump to exception vector"
         );
     }
@@ -188,8 +183,7 @@ mod tests {
 
         // PC should be set to BFC00180 (BIOS exception vector)
         assert_eq!(
-            cpu.pc,
-            0xBFC00180,
+            cpu.pc, 0xBFC00180,
             "SYSCALL with BEV=1 should jump to BIOS exception vector"
         );
     }
@@ -275,11 +269,7 @@ mod tests {
 
         cpu.op_break(0).unwrap();
 
-        assert_eq!(
-            cpu.pc,
-            0x80000080,
-            "BREAK should jump to exception vector"
-        );
+        assert_eq!(cpu.pc, 0x80000080, "BREAK should jump to exception vector");
     }
 
     // ========== Comparison Tests ==========
@@ -340,7 +330,10 @@ mod tests {
         let cause = cpu.cop0.regs[COP0::CAUSE];
         let bd_bit = (cause >> 31) & 0x01;
 
-        assert_eq!(bd_bit, 1, "BD bit should be set when exception in delay slot");
+        assert_eq!(
+            bd_bit, 1,
+            "BD bit should be set when exception in delay slot"
+        );
     }
 
     #[test]
@@ -372,9 +365,7 @@ mod tests {
 
     #[test]
     fn test_exception_from_different_pc_values() {
-        let test_pcs = [
-            0x80000000, 0xBFC00000, 0xA0000100, 0x00001000, 0xFFFFFFFC,
-        ];
+        let test_pcs = [0x80000000, 0xBFC00000, 0xA0000100, 0x00001000, 0xFFFFFFFC];
 
         for &test_pc in &test_pcs {
             let mut cpu = create_test_cpu();

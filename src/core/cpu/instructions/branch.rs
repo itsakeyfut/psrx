@@ -207,8 +207,7 @@ mod tests {
 
         // Branch target = PC + (4 << 2) = 0x80000000 + 16 = 0x80000010
         assert_eq!(
-            cpu.next_pc,
-            0x80000010,
+            cpu.next_pc, 0x80000010,
             "BEQ: should branch when registers are equal"
         );
         assert!(cpu.in_branch_delay, "BEQ: should set branch delay flag");
@@ -226,8 +225,7 @@ mod tests {
         cpu.op_beq(instruction).unwrap();
 
         assert_eq!(
-            cpu.next_pc,
-            0x80000004,
+            cpu.next_pc, 0x80000004,
             "BEQ: should not branch when registers are not equal"
         );
         assert!(
@@ -249,8 +247,7 @@ mod tests {
 
         // 0x80000000 + (8 << 2) = 0x80000000 + 32 = 0x80000020
         assert_eq!(
-            cpu.next_pc,
-            0x80000020,
+            cpu.next_pc, 0x80000020,
             "BEQ: should branch when comparing r0 with zero"
         );
     }
@@ -269,8 +266,7 @@ mod tests {
 
         // Branch target = 0x80000100 + (-4 << 2) = 0x80000100 - 16 = 0x800000F0
         assert_eq!(
-            cpu.next_pc,
-            0x800000F0,
+            cpu.next_pc, 0x800000F0,
             "BEQ: should handle negative offsets (backward branches)"
         );
     }
@@ -289,8 +285,7 @@ mod tests {
         cpu.op_bne(instruction).unwrap();
 
         assert_eq!(
-            cpu.next_pc,
-            0x80000010,
+            cpu.next_pc, 0x80000010,
             "BNE: should branch when registers are not equal"
         );
         assert!(cpu.in_branch_delay, "BNE: should set branch delay flag");
@@ -308,11 +303,13 @@ mod tests {
         cpu.op_bne(instruction).unwrap();
 
         assert_eq!(
-            cpu.next_pc,
-            0x80000004,
+            cpu.next_pc, 0x80000004,
             "BNE: should not branch when registers are equal"
         );
-        assert!(!cpu.in_branch_delay, "BNE: should not set branch delay flag");
+        assert!(
+            !cpu.in_branch_delay,
+            "BNE: should not set branch delay flag"
+        );
     }
 
     // ========== BLEZ Tests ==========
@@ -328,8 +325,7 @@ mod tests {
         cpu.op_blez(instruction).unwrap();
 
         assert_eq!(
-            cpu.next_pc,
-            0x80000010,
+            cpu.next_pc, 0x80000010,
             "BLEZ: should branch when register is negative"
         );
     }
@@ -345,8 +341,7 @@ mod tests {
         cpu.op_blez(instruction).unwrap();
 
         assert_eq!(
-            cpu.next_pc,
-            0x80000010,
+            cpu.next_pc, 0x80000010,
             "BLEZ: should branch when register is zero"
         );
     }
@@ -362,8 +357,7 @@ mod tests {
         cpu.op_blez(instruction).unwrap();
 
         assert_eq!(
-            cpu.next_pc,
-            0x80000004,
+            cpu.next_pc, 0x80000004,
             "BLEZ: should not branch when register is positive"
         );
     }
@@ -381,8 +375,7 @@ mod tests {
         cpu.op_bgtz(instruction).unwrap();
 
         assert_eq!(
-            cpu.next_pc,
-            0x80000010,
+            cpu.next_pc, 0x80000010,
             "BGTZ: should branch when register is positive"
         );
     }
@@ -398,8 +391,7 @@ mod tests {
         cpu.op_bgtz(instruction).unwrap();
 
         assert_eq!(
-            cpu.next_pc,
-            0x80000004,
+            cpu.next_pc, 0x80000004,
             "BGTZ: should not branch when register is zero"
         );
     }
@@ -415,8 +407,7 @@ mod tests {
         cpu.op_bgtz(instruction).unwrap();
 
         assert_eq!(
-            cpu.next_pc,
-            0x80000004,
+            cpu.next_pc, 0x80000004,
             "BGTZ: should not branch when register is negative"
         );
     }
@@ -435,8 +426,7 @@ mod tests {
         cpu.execute_bcondz(instruction).unwrap();
 
         assert_eq!(
-            cpu.next_pc,
-            0x80000010,
+            cpu.next_pc, 0x80000010,
             "BLTZ: should branch when register is negative"
         );
     }
@@ -452,8 +442,7 @@ mod tests {
         cpu.execute_bcondz(instruction).unwrap();
 
         assert_eq!(
-            cpu.next_pc,
-            0x80000004,
+            cpu.next_pc, 0x80000004,
             "BLTZ: should not branch when register is positive"
         );
     }
@@ -470,8 +459,7 @@ mod tests {
         cpu.execute_bcondz(instruction).unwrap();
 
         assert_eq!(
-            cpu.next_pc,
-            0x80000010,
+            cpu.next_pc, 0x80000010,
             "BGEZ: should branch when register is positive"
         );
     }
@@ -487,8 +475,7 @@ mod tests {
         cpu.execute_bcondz(instruction).unwrap();
 
         assert_eq!(
-            cpu.next_pc,
-            0x80000010,
+            cpu.next_pc, 0x80000010,
             "BGEZ: should branch when register is zero"
         );
     }
@@ -505,8 +492,7 @@ mod tests {
         cpu.execute_bcondz(instruction).unwrap();
 
         assert_eq!(
-            cpu.next_pc,
-            0x80000010,
+            cpu.next_pc, 0x80000010,
             "BLTZAL: should branch when negative"
         );
         assert_eq!(
@@ -528,8 +514,7 @@ mod tests {
         cpu.execute_bcondz(instruction).unwrap();
 
         assert_eq!(
-            cpu.next_pc,
-            0x80000010,
+            cpu.next_pc, 0x80000010,
             "BGEZAL: should branch when positive"
         );
         assert_eq!(
@@ -551,8 +536,7 @@ mod tests {
         cpu.execute_bcondz(instruction).unwrap();
 
         assert_eq!(
-            cpu.next_pc,
-            0x80000004,
+            cpu.next_pc, 0x80000004,
             "BGEZAL: should not branch when negative"
         );
         assert_eq!(
@@ -611,8 +595,7 @@ mod tests {
         cpu.op_beq(instruction).unwrap();
 
         assert_eq!(
-            cpu.next_pc,
-            0x80000000,
+            cpu.next_pc, 0x80000000,
             "BEQ: zero offset should loop to PC"
         );
     }
