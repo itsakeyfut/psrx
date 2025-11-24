@@ -643,3 +643,1049 @@ impl Default for GTE {
         Self::new()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ============================================================================
+    // Basic Register Tests
+    // ============================================================================
+
+    #[test]
+    fn test_new_initializes_all_registers_to_zero() {
+        let gte = GTE::new();
+        for i in 0..32 {
+            assert_eq!(gte.read_data(i), 0, "Data register {} not zero", i);
+            assert_eq!(gte.read_control(i), 0, "Control register {} not zero", i);
+        }
+        assert_eq!(gte.flags, 0, "FLAGS not zero");
+    }
+
+    #[test]
+    fn test_reset_clears_all_registers() {
+        let mut gte = GTE::new();
+        // Set some registers
+        gte.write_data(0, 0x12345678);
+        gte.write_control(0, 0x87654321u32 as i32);
+        gte.flags = 0xFFFFFFFF;
+
+        gte.reset();
+
+        for i in 0..32 {
+            assert_eq!(gte.read_data(i), 0, "Data register {} not cleared", i);
+            assert_eq!(gte.read_control(i), 0, "Control register {} not cleared", i);
+        }
+        assert_eq!(gte.flags, 0, "FLAGS not cleared");
+    }
+
+    #[test]
+    fn test_data_register_read_write() {
+        let mut gte = GTE::new();
+        let test_value = 0x12345678i32;
+
+        for i in 0..32 {
+            if i == GTE::SXYP || i == GTE::LZCS {
+                continue; // These have special behavior
+            }
+            gte.write_data(i, test_value);
+            assert_eq!(
+                gte.read_data(i),
+                test_value,
+                "Data register {} failed read/write",
+                i
+            );
+        }
+    }
+
+    #[test]
+    fn test_control_register_read_write() {
+        let mut gte = GTE::new();
+        let test_value = 0x87654321u32 as i32;
+
+        for i in 0..32 {
+            gte.write_control(i, test_value);
+            assert_eq!(
+                gte.read_control(i),
+                test_value,
+                "Control register {} failed read/write",
+                i
+            );
+        }
+    }
+
+    // ============================================================================
+    // SXYP FIFO Tests (Data Register 15)
+    // ============================================================================
+
+    #[test]
+    fn test_sxyp_fifo_push() {
+        let mut gte = GTE::new();
+
+        // Initial state: all zeros
+        assert_eq!(gte.read_data(GTE::SXY0), 0);
+        assert_eq!(gte.read_data(GTE::SXY1), 0);
+        assert_eq!(gte.read_data(GTE::SXY2), 0);
+        assert_eq!(gte.read_data(GTE::SXYP), 0);
+
+        // Write first value to SXYP
+        gte.write_data(GTE::SXYP, 0x11111111);
+        assert_eq!(gte.read_data(GTE::SXY0), 0);
+        assert_eq!(gte.read_data(GTE::SXY1), 0);
+        assert_eq!(gte.read_data(GTE::SXY2), 0x11111111);
+        assert_eq!(gte.read_data(GTE::SXYP), 0x11111111);
+
+        // Write second value - should shift
+        gte.write_data(GTE::SXYP, 0x22222222);
+        assert_eq!(gte.read_data(GTE::SXY0), 0);
+        assert_eq!(gte.read_data(GTE::SXY1), 0x11111111);
+        assert_eq!(gte.read_data(GTE::SXY2), 0x22222222);
+        assert_eq!(gte.read_data(GTE::SXYP), 0x22222222);
+
+        // Write third value - should shift all
+        gte.write_data(GTE::SXYP, 0x33333333);
+        assert_eq!(gte.read_data(GTE::SXY0), 0x11111111);
+        assert_eq!(gte.read_data(GTE::SXY1), 0x22222222);
+        assert_eq!(gte.read_data(GTE::SXY2), 0x33333333);
+        assert_eq!(gte.read_data(GTE::SXYP), 0x33333333);
+
+        // Fourth value - oldest value (0x11111111) is discarded
+        gte.write_data(GTE::SXYP, 0x44444444);
+        assert_eq!(gte.read_data(GTE::SXY0), 0x22222222);
+        assert_eq!(gte.read_data(GTE::SXY1), 0x33333333);
+        assert_eq!(gte.read_data(GTE::SXY2), 0x44444444);
+        assert_eq!(gte.read_data(GTE::SXYP), 0x44444444);
+    }
+
+    #[test]
+    fn test_sxy2_direct_write_no_fifo() {
+        let mut gte = GTE::new();
+
+        // Pre-populate FIFO
+        gte.write_data(GTE::SXYP, 0x11111111);
+        gte.write_data(GTE::SXYP, 0x22222222);
+
+        // Direct write to SXY2 should NOT affect FIFO
+        gte.write_data(GTE::SXY2, 0x99999999u32 as i32);
+        assert_eq!(gte.read_data(GTE::SXY0), 0);
+        assert_eq!(gte.read_data(GTE::SXY1), 0x11111111);
+        assert_eq!(gte.read_data(GTE::SXY2), 0x99999999u32 as i32);
+    }
+
+    // ============================================================================
+    // LZCS/LZCR Leading Zero Count Tests
+    // ============================================================================
+
+    #[test]
+    fn test_lzcs_leading_zeros_positive() {
+        let mut gte = GTE::new();
+
+        // Test cases for positive values
+        gte.write_data(GTE::LZCS, 0x00000001); // 31 leading zeros
+        assert_eq!(gte.read_data(GTE::LZCR), 31);
+
+        gte.write_data(GTE::LZCS, 0x00000010); // 27 leading zeros
+        assert_eq!(gte.read_data(GTE::LZCR), 27);
+
+        gte.write_data(GTE::LZCS, 0x7FFFFFFF); // 1 leading zero
+        assert_eq!(gte.read_data(GTE::LZCR), 1);
+
+        gte.write_data(GTE::LZCS, 0x80000000u32 as i32); // No leading zeros
+        assert_eq!(gte.read_data(GTE::LZCR), 0);
+
+        gte.write_data(GTE::LZCS, 0xFFFFFFFFu32 as i32); // No leading zeros
+        assert_eq!(gte.read_data(GTE::LZCR), 0);
+    }
+
+    #[test]
+    fn test_lzcs_all_zeros() {
+        let mut gte = GTE::new();
+        gte.write_data(GTE::LZCS, 0); // All zeros = 32 leading zeros
+        assert_eq!(gte.read_data(GTE::LZCR), 32);
+    }
+
+    #[test]
+    fn test_lzcs_all_ones() {
+        let mut gte = GTE::new();
+        gte.write_data(GTE::LZCS, -1); // All ones = 0 leading zeros
+        assert_eq!(gte.read_data(GTE::LZCR), 0);
+    }
+
+    #[test]
+    fn test_lzcs_powers_of_two() {
+        let mut gte = GTE::new();
+
+        for i in 0..31 {
+            let value = 1u32 << i;
+            gte.write_data(GTE::LZCS, value as i32);
+            assert_eq!(gte.read_data(GTE::LZCR), (31 - i), "Failed for 2^{}", i);
+        }
+    }
+
+    // ============================================================================
+    // RTPS (Rotate, Translate, Perspective Single) Tests
+    // ============================================================================
+
+    #[test]
+    fn test_rtps_identity_matrix_zero_translation() {
+        let mut gte = GTE::new();
+
+        // Set up identity rotation matrix (1.0 in fixed-point = 0x1000)
+        gte.write_control(GTE::RT11_RT12, 0x1000);
+        gte.write_control(GTE::RT13_RT21, 0);
+        gte.write_control(GTE::RT22_RT23, 0x1000);
+        gte.write_control(GTE::RT31_RT32, 0);
+        gte.write_control(GTE::RT33, 0x1000);
+
+        // Zero translation
+        gte.write_control(GTE::TRX, 0);
+        gte.write_control(GTE::TRY, 0);
+        gte.write_control(GTE::TRZ, 1000); // Z=1000 to avoid divide issues
+
+        // Set input vertex V0 = (100, 200, 1000)
+        gte.write_data(GTE::VXY0, (200 << 16) | (100 & 0xFFFF));
+        gte.write_data(GTE::VZ0, 1000);
+
+        // Set projection parameters
+        gte.write_control(GTE::H, 1000); // Projection distance
+        gte.write_control(GTE::OFX, 0); // Screen offset X
+        gte.write_control(GTE::OFY, 0); // Screen offset Y
+
+        // Execute RTPS with sf=1
+        gte.rtps(true);
+
+        // With identity matrix: MAC = V * 1.0 + TR
+        // Formula: MAC = (TR*0x1000 + RT*V) >> 12
+        // With TRZ=1000, VZ=1000, RT33=0x1000: MAC3 = (1000<<12 + 0x1000*1000)>>12 = 2000
+        assert_eq!(gte.read_data(GTE::MAC1), 100);
+        assert_eq!(gte.read_data(GTE::MAC2), 200);
+        assert_eq!(gte.read_data(GTE::MAC3), 2000);
+
+        // IR registers should contain saturated MAC values
+        assert_eq!(gte.read_data(GTE::IR1), 100);
+        assert_eq!(gte.read_data(GTE::IR2), 200);
+        assert_eq!(gte.read_data(GTE::IR3), 2000);
+    }
+
+    #[test]
+    fn test_rtps_with_translation() {
+        let mut gte = GTE::new();
+
+        // Identity matrix
+        gte.write_control(GTE::RT11_RT12, 0x1000);
+        gte.write_control(GTE::RT22_RT23, 0x1000);
+        gte.write_control(GTE::RT33, 0x1000);
+
+        // Translation vector (500, 600, 700)
+        gte.write_control(GTE::TRX, 500);
+        gte.write_control(GTE::TRY, 600);
+        gte.write_control(GTE::TRZ, 700);
+
+        // Input vertex V0 = (10, 20, 30)
+        gte.write_data(GTE::VXY0, (20 << 16) | (10 & 0xFFFF));
+        gte.write_data(GTE::VZ0, 30);
+
+        gte.write_control(GTE::H, 1000);
+        gte.write_control(GTE::OFX, 0);
+        gte.write_control(GTE::OFY, 0);
+
+        gte.rtps(true);
+
+        // With identity matrix: MAC = V + TR
+        // Expected: MAC1 = 10 + 500 = 510
+        assert_eq!(gte.read_data(GTE::MAC1), 510);
+        assert_eq!(gte.read_data(GTE::MAC2), 620);
+        assert_eq!(gte.read_data(GTE::MAC3), 730);
+    }
+
+    #[test]
+    fn test_rtps_divide_by_zero_sets_flag() {
+        let mut gte = GTE::new();
+
+        // Set up simple transform
+        gte.write_control(GTE::RT11_RT12, 0x1000);
+        gte.write_control(GTE::RT22_RT23, 0x1000);
+        gte.write_control(GTE::RT33, 0x1000);
+
+        // Zero Z coordinate will cause divide by zero
+        gte.write_data(GTE::VXY0, (100 << 16) | 100);
+        gte.write_data(GTE::VZ0, 0);
+
+        gte.write_control(GTE::TRX, 0);
+        gte.write_control(GTE::TRY, 0);
+        gte.write_control(GTE::TRZ, 0); // Results in MAC3 = 0
+
+        gte.write_control(GTE::H, 1000);
+        gte.write_control(GTE::OFX, 0);
+        gte.write_control(GTE::OFY, 0);
+
+        gte.rtps(true);
+
+        // Check divide overflow flag is set (bit 14)
+        assert_ne!(gte.flags & (1 << 14), 0, "Divide overflow flag not set");
+        assert_eq!(
+            gte.read_data(GTE::LZCR) as u32 & (1 << 14),
+            1 << 14,
+            "LZCR should reflect divide overflow flag"
+        );
+    }
+
+    #[test]
+    fn test_rtps_negative_z_sets_flag() {
+        let mut gte = GTE::new();
+
+        gte.write_control(GTE::RT11_RT12, 0x1000);
+        gte.write_control(GTE::RT22_RT23, 0x1000);
+        gte.write_control(GTE::RT33, 0x1000);
+
+        // Negative Z coordinate
+        gte.write_data(GTE::VXY0, (100 << 16) | 100);
+        gte.write_data(GTE::VZ0, -1000i16 as i32);
+
+        gte.write_control(GTE::TRX, 0);
+        gte.write_control(GTE::TRY, 0);
+        gte.write_control(GTE::TRZ, 0);
+
+        gte.write_control(GTE::H, 1000);
+        gte.write_control(GTE::OFX, 0);
+        gte.write_control(GTE::OFY, 0);
+
+        gte.rtps(true);
+
+        // Check divide overflow flag is set (bit 14)
+        assert_ne!(gte.flags & (1 << 14), 0, "Divide overflow flag not set");
+    }
+
+    #[test]
+    fn test_rtps_fifo_updates() {
+        let mut gte = GTE::new();
+
+        // Setup basic transform
+        gte.write_control(GTE::RT11_RT12, 0x1000);
+        gte.write_control(GTE::RT22_RT23, 0x1000);
+        gte.write_control(GTE::RT33, 0x1000);
+        gte.write_control(GTE::TRX, 0);
+        gte.write_control(GTE::TRY, 0);
+        gte.write_control(GTE::TRZ, 1000);
+        gte.write_control(GTE::H, 1000);
+        gte.write_control(GTE::OFX, 0);
+        gte.write_control(GTE::OFY, 0);
+
+        // First vertex
+        gte.write_data(GTE::VXY0, (100 << 16) | 100);
+        gte.write_data(GTE::VZ0, 1000);
+        gte.rtps(true);
+
+        let sxy_first = gte.read_data(GTE::SXY2);
+        let sz_first = gte.read_data(GTE::SZ3);
+
+        // Second vertex
+        gte.write_data(GTE::VXY0, (200 << 16) | 200);
+        gte.write_data(GTE::VZ0, 2000);
+        gte.rtps(true);
+
+        // Check that first result shifted to SXY1
+        assert_eq!(gte.read_data(GTE::SXY1), sxy_first);
+        // Check that SZ FIFO shifted
+        assert_eq!(gte.read_data(GTE::SZ2), sz_first);
+    }
+
+    #[test]
+    fn test_rtps_screen_coordinate_saturation() {
+        let mut gte = GTE::new();
+
+        // Set up transform that will produce large screen coordinates
+        gte.write_control(GTE::RT11_RT12, 0x1000);
+        gte.write_control(GTE::RT22_RT23, 0x1000);
+        gte.write_control(GTE::RT33, 0x1000);
+
+        // Very large input values
+        gte.write_data(
+            GTE::VXY0,
+            ((30000i16 as u16 as u32) << 16 | (30000i16 as u16 as u32)) as i32,
+        );
+        gte.write_data(GTE::VZ0, 100);
+
+        gte.write_control(GTE::TRX, 0);
+        gte.write_control(GTE::TRY, 0);
+        gte.write_control(GTE::TRZ, 100);
+        gte.write_control(GTE::H, 10000);
+        gte.write_control(GTE::OFX, 0);
+        gte.write_control(GTE::OFY, 0);
+
+        gte.rtps(true);
+
+        // SX and SY should be saturated to -1024..1023 range
+        let sxy2 = gte.read_data(GTE::SXY2);
+        let sx = (sxy2 & 0xFFFF) as i16 as i32;
+        let sy = (sxy2 >> 16) as i16 as i32;
+
+        assert!((-1024..=1023).contains(&sx), "SX not saturated: {}", sx);
+        assert!((-1024..=1023).contains(&sy), "SY not saturated: {}", sy);
+    }
+
+    #[test]
+    fn test_rtps_otz_calculation() {
+        let mut gte = GTE::new();
+
+        // Setup
+        gte.write_control(GTE::RT11_RT12, 0x1000);
+        gte.write_control(GTE::RT22_RT23, 0x1000);
+        gte.write_control(GTE::RT33, 0x1000);
+        gte.write_control(GTE::TRX, 0);
+        gte.write_control(GTE::TRY, 0);
+        gte.write_control(GTE::TRZ, 0);
+        gte.write_control(GTE::H, 1000);
+        gte.write_control(GTE::OFX, 0);
+        gte.write_control(GTE::OFY, 0);
+
+        // Execute RTPS three times to fill SZ FIFO
+        gte.write_data(GTE::VXY0, 0);
+        gte.write_data(GTE::VZ0, 300);
+        gte.rtps(true);
+
+        gte.write_data(GTE::VZ0, 600);
+        gte.rtps(true);
+
+        gte.write_data(GTE::VZ0, 900);
+        gte.rtps(true);
+
+        // OTZ should be average of SZ1, SZ2, SZ3
+        // (300 + 600 + 900) / 3 = 600
+        let otz = gte.read_data(GTE::OTZ);
+        assert_eq!(otz, 600, "OTZ should be average of last 3 SZ values");
+    }
+
+    #[test]
+    fn test_rtps_sf_flag_behavior() {
+        let mut gte = GTE::new();
+
+        // Setup
+        gte.write_control(GTE::RT11_RT12, 0x2000); // 2.0 in fixed-point
+        gte.write_control(GTE::RT22_RT23, 0x2000);
+        gte.write_control(GTE::RT33, 0x2000);
+        gte.write_control(GTE::TRX, 0);
+        gte.write_control(GTE::TRY, 0);
+        gte.write_control(GTE::TRZ, 0);
+
+        gte.write_data(GTE::VXY0, (100 << 16) | 100);
+        gte.write_data(GTE::VZ0, 100);
+
+        // Test with sf=false (no shift)
+        gte.rtps(false);
+        let mac1_no_shift = gte.read_data(GTE::MAC1);
+
+        // Reset and test with sf=true (shift by 12)
+        gte.reset();
+        gte.write_control(GTE::RT11_RT12, 0x2000);
+        gte.write_control(GTE::RT22_RT23, 0x2000);
+        gte.write_control(GTE::RT33, 0x2000);
+        gte.write_control(GTE::TRX, 0);
+        gte.write_control(GTE::TRY, 0);
+        gte.write_control(GTE::TRZ, 0);
+        gte.write_data(GTE::VXY0, (100 << 16) | 100);
+        gte.write_data(GTE::VZ0, 100);
+        gte.rtps(true);
+        let mac1_with_shift = gte.read_data(GTE::MAC1);
+
+        // With sf=true, result should be shifted right by 12 bits
+        assert!(
+            mac1_no_shift > mac1_with_shift,
+            "sf=true should produce smaller MAC values"
+        );
+    }
+
+    // ============================================================================
+    // RTPT (Rotate, Translate, Perspective Triple) Tests
+    // ============================================================================
+
+    #[test]
+    fn test_rtpt_transforms_three_vertices() {
+        let mut gte = GTE::new();
+
+        // Setup
+        gte.write_control(GTE::RT11_RT12, 0x1000);
+        gte.write_control(GTE::RT22_RT23, 0x1000);
+        gte.write_control(GTE::RT33, 0x1000);
+        gte.write_control(GTE::TRX, 0);
+        gte.write_control(GTE::TRY, 0);
+        gte.write_control(GTE::TRZ, 1000);
+        gte.write_control(GTE::H, 1000);
+        gte.write_control(GTE::OFX, 0);
+        gte.write_control(GTE::OFY, 0);
+
+        // Set three vertices
+        gte.write_data(GTE::VXY0, (100 << 16) | 100);
+        gte.write_data(GTE::VZ0, 1000);
+
+        gte.write_data(GTE::VXY1, (200 << 16) | 200);
+        gte.write_data(GTE::VZ1, 2000);
+
+        gte.write_data(GTE::VXY2, (300 << 16) | 300);
+        gte.write_data(GTE::VZ2, 3000);
+
+        gte.rtpt(true);
+
+        // Check that all three screen coordinates are in the FIFO
+        let sxy0 = gte.read_data(GTE::SXY0);
+        let sxy1 = gte.read_data(GTE::SXY1);
+        let sxy2 = gte.read_data(GTE::SXY2);
+
+        assert_ne!(sxy0, 0, "SXY0 should contain first vertex result");
+        assert_ne!(sxy1, 0, "SXY1 should contain second vertex result");
+        assert_ne!(sxy2, 0, "SXY2 should contain third vertex result");
+
+        // All three should be different
+        assert_ne!(sxy0, sxy1, "V0 and V1 results should differ");
+        assert_ne!(sxy1, sxy2, "V1 and V2 results should differ");
+    }
+
+    #[test]
+    fn test_rtpt_preserves_v0() {
+        let mut gte = GTE::new();
+
+        // Setup
+        gte.write_control(GTE::RT11_RT12, 0x1000);
+        gte.write_control(GTE::RT22_RT23, 0x1000);
+        gte.write_control(GTE::RT33, 0x1000);
+        gte.write_control(GTE::TRX, 0);
+        gte.write_control(GTE::TRY, 0);
+        gte.write_control(GTE::TRZ, 1000);
+        gte.write_control(GTE::H, 1000);
+        gte.write_control(GTE::OFX, 0);
+        gte.write_control(GTE::OFY, 0);
+
+        let v0_xy = (123 << 16) | 456;
+        let v0_z = 789;
+
+        gte.write_data(GTE::VXY0, v0_xy);
+        gte.write_data(GTE::VZ0, v0_z);
+        gte.write_data(GTE::VXY1, (200 << 16) | 200);
+        gte.write_data(GTE::VZ1, 2000);
+        gte.write_data(GTE::VXY2, (300 << 16) | 300);
+        gte.write_data(GTE::VZ2, 3000);
+
+        gte.rtpt(true);
+
+        // V0 should be preserved after RTPT
+        assert_eq!(
+            gte.read_data(GTE::VXY0),
+            v0_xy,
+            "VXY0 not preserved after RTPT"
+        );
+        assert_eq!(
+            gte.read_data(GTE::VZ0),
+            v0_z,
+            "VZ0 not preserved after RTPT"
+        );
+    }
+
+    // ============================================================================
+    // NCLIP (Normal Clipping) Tests
+    // ============================================================================
+
+    #[test]
+    fn test_nclip_front_facing_clockwise() {
+        let mut gte = GTE::new();
+
+        // Set up clockwise triangle (front-facing)
+        // Triangle vertices in screen space
+        gte.write_data(GTE::SXY0, 0); // (0, 0)
+        gte.write_data(GTE::SXY1, 100); // (100, 0)
+        gte.write_data(GTE::SXY2, (50 << 16) | 50); // (50, 50)
+
+        gte.nclip();
+
+        let mac0 = gte.read_data(GTE::MAC0);
+        // For clockwise winding, MAC0 should be positive
+        assert!(mac0 > 0, "Front-facing triangle should have MAC0 > 0");
+    }
+
+    #[test]
+    fn test_nclip_back_facing_counter_clockwise() {
+        let mut gte = GTE::new();
+
+        // Set up counter-clockwise triangle (back-facing)
+        gte.write_data(GTE::SXY0, 0); // (0, 0)
+        gte.write_data(GTE::SXY1, (50 << 16) | 50); // (50, 50)
+        gte.write_data(GTE::SXY2, 100); // (100, 0)
+
+        gte.nclip();
+
+        let mac0 = gte.read_data(GTE::MAC0);
+        // For counter-clockwise winding, MAC0 should be negative
+        assert!(mac0 < 0, "Back-facing triangle should have MAC0 < 0");
+    }
+
+    #[test]
+    fn test_nclip_edge_on_triangle() {
+        let mut gte = GTE::new();
+
+        // Set up degenerate triangle (all points on a line)
+        gte.write_data(GTE::SXY0, 0); // (0, 0)
+        gte.write_data(GTE::SXY1, 50); // (50, 0)
+        gte.write_data(GTE::SXY2, 100); // (100, 0)
+
+        gte.nclip();
+
+        let mac0 = gte.read_data(GTE::MAC0);
+        // Edge-on triangle should have MAC0 = 0
+        assert_eq!(mac0, 0, "Edge-on triangle should have MAC0 = 0");
+    }
+
+    #[test]
+    fn test_nclip_clears_flags() {
+        let mut gte = GTE::new();
+
+        // Set some flags
+        gte.flags = 0xFFFFFFFF;
+        gte.data[GTE::LZCR] = 0xFFFFFFFFu32 as i32;
+
+        // Set up valid triangle
+        gte.write_data(GTE::SXY0, 0);
+        gte.write_data(GTE::SXY1, 100);
+        gte.write_data(GTE::SXY2, (50 << 16) | 50);
+
+        gte.nclip();
+
+        // Flags should be cleared
+        assert_eq!(gte.flags, 0, "NCLIP should clear flags");
+        assert_eq!(gte.read_data(GTE::LZCR), 0, "LZCR should be cleared");
+    }
+
+    #[test]
+    fn test_nclip_with_negative_coordinates() {
+        let mut gte = GTE::new();
+
+        // Triangle with negative coordinates
+        gte.write_data(
+            GTE::SXY0,
+            (((-50i16 as u16 as u32) << 16) | (-50i16 as u16 as u32)) as i32,
+        );
+        gte.write_data(GTE::SXY1, (((-50i16 as u16 as u32) << 16) | 50) as i32);
+        gte.write_data(GTE::SXY2, 50 << 16);
+
+        gte.nclip();
+
+        let mac0 = gte.read_data(GTE::MAC0);
+        // Should still calculate correctly with negative values
+        assert_ne!(mac0, 0, "NCLIP should work with negative coordinates");
+    }
+
+    // ============================================================================
+    // MVMVA (Matrix-Vector Multiply-Add) Tests
+    // ============================================================================
+
+    #[test]
+    fn test_mvmva_vector_v0_selection() {
+        let mut gte = GTE::new();
+
+        // Setup identity matrix
+        gte.write_control(GTE::RT11_RT12, 0x1000);
+        gte.write_control(GTE::RT22_RT23, 0x1000);
+        gte.write_control(GTE::RT33, 0x1000);
+        gte.write_control(GTE::TRX, 0);
+        gte.write_control(GTE::TRY, 0);
+        gte.write_control(GTE::TRZ, 0);
+
+        // Set V0 = (100, 200, 300)
+        gte.write_data(GTE::VXY0, (200 << 16) | 100);
+        gte.write_data(GTE::VZ0, 300);
+
+        // MVMVA command: v=0 (V0), mx=0 (RT), cv=3 (none), lm=0, sf=1
+        // Bits: sf(19)=1, mx(17-18)=0, v(15-16)=0, cv(13-14)=3, lm(10)=0, opcode(0-5)=0x12
+        let command = 0x00086012; // sf=1(0x80000), cv=3(0x6000), opcode=0x12
+        gte.mvmva(command);
+
+        // Result should be V0 * I + 0 = V0 (no translation with cv=3)
+        assert_eq!(gte.read_data(GTE::MAC1), 100);
+        assert_eq!(gte.read_data(GTE::MAC2), 200);
+        assert_eq!(gte.read_data(GTE::MAC3), 300);
+    }
+
+    #[test]
+    fn test_mvmva_vector_v1_selection() {
+        let mut gte = GTE::new();
+
+        gte.write_control(GTE::RT11_RT12, 0x1000);
+        gte.write_control(GTE::RT22_RT23, 0x1000);
+        gte.write_control(GTE::RT33, 0x1000);
+
+        // Set V1 = (400, 500, 600)
+        gte.write_data(GTE::VXY1, (500 << 16) | 400);
+        gte.write_data(GTE::VZ1, 600);
+
+        // MVMVA: v=1 (V1), cv=3 (none)
+        // Bits: sf(19)=1, mx(17-18)=0, v(15-16)=1, cv(13-14)=3, lm(10)=0, opcode=0x12
+        let command = 0x0008E012; // sf=1(0x80000), v=1(0x8000), cv=3(0x6000)
+        gte.mvmva(command);
+
+        assert_eq!(gte.read_data(GTE::MAC1), 400);
+        assert_eq!(gte.read_data(GTE::MAC2), 500);
+        assert_eq!(gte.read_data(GTE::MAC3), 600);
+    }
+
+    #[test]
+    fn test_mvmva_vector_ir_selection() {
+        let mut gte = GTE::new();
+
+        gte.write_control(GTE::RT11_RT12, 0x1000);
+        gte.write_control(GTE::RT22_RT23, 0x1000);
+        gte.write_control(GTE::RT33, 0x1000);
+
+        // Set IR registers
+        gte.write_data(GTE::IR1, 111);
+        gte.write_data(GTE::IR2, 222);
+        gte.write_data(GTE::IR3, 333);
+
+        // MVMVA: v=3 (IR), cv=3 (none)
+        // Bits: sf(19)=1, mx(17-18)=0, v(15-16)=3, cv(13-14)=3, lm(10)=0, opcode=0x12
+        let command = 0x0009E012; // sf=1(0x80000), v=3(0x18000), cv=3(0x6000)
+        gte.mvmva(command);
+
+        assert_eq!(gte.read_data(GTE::MAC1), 111);
+        assert_eq!(gte.read_data(GTE::MAC2), 222);
+        assert_eq!(gte.read_data(GTE::MAC3), 333);
+    }
+
+    #[test]
+    fn test_mvmva_lm_flag_unsigned_saturation() {
+        let mut gte = GTE::new();
+
+        gte.write_control(GTE::RT11_RT12, 0x1000);
+        gte.write_control(GTE::RT22_RT23, 0x1000);
+        gte.write_control(GTE::RT33, 0x1000);
+
+        // Set negative values
+        gte.write_data(
+            GTE::VXY0,
+            (((-100i16 as u16 as u32) << 16) | (-100i16 as u16 as u32)) as i32,
+        );
+        gte.write_data(GTE::VZ0, (-100i16 as u16 as u32) as i32);
+
+        // With lm=1 (unsigned saturation), negative values should saturate to 0
+        let command = 0x00400412; // lm=1
+        gte.mvmva(command);
+
+        let ir1 = gte.read_data(GTE::IR1);
+        let ir2 = gte.read_data(GTE::IR2);
+        let ir3 = gte.read_data(GTE::IR3);
+
+        // With lm=1, negative IR values should be clamped to 0
+        assert!(ir1 >= 0, "IR1 should be non-negative with lm=1");
+        assert!(ir2 >= 0, "IR2 should be non-negative with lm=1");
+        assert!(ir3 >= 0, "IR3 should be non-negative with lm=1");
+    }
+
+    #[test]
+    fn test_mvmva_sf_flag_shift() {
+        let mut gte = GTE::new();
+
+        // Matrix with value 2.0
+        gte.write_control(GTE::RT11_RT12, 0x2000);
+        gte.write_control(GTE::RT22_RT23, 0x2000);
+        gte.write_control(GTE::RT33, 0x2000);
+
+        gte.write_data(GTE::VXY0, (100 << 16) | 100);
+        gte.write_data(GTE::VZ0, 100);
+
+        // Test with sf=0 (no shift)
+        let command_no_shift = 0x00000012;
+        gte.mvmva(command_no_shift);
+        let mac1_no_shift = gte.read_data(GTE::MAC1);
+
+        // Test with sf=1 (shift by 12)
+        let command_shift = 0x00080012;
+        gte.mvmva(command_shift);
+        let mac1_shift = gte.read_data(GTE::MAC1);
+
+        // With shift, result should be smaller
+        assert!(
+            mac1_no_shift > mac1_shift,
+            "sf=1 should produce smaller result"
+        );
+    }
+
+    // ============================================================================
+    // GTE Command Execute Tests
+    // ============================================================================
+
+    #[test]
+    fn test_execute_rtps_opcode() {
+        let mut gte = GTE::new();
+
+        // Setup basic transform
+        gte.write_control(GTE::RT11_RT12, 0x1000);
+        gte.write_control(GTE::RT22_RT23, 0x1000);
+        gte.write_control(GTE::RT33, 0x1000);
+        gte.write_control(GTE::TRZ, 1000);
+        gte.write_control(GTE::H, 1000);
+
+        gte.write_data(GTE::VXY0, (100 << 16) | 100);
+        gte.write_data(GTE::VZ0, 1000);
+
+        // Execute RTPS via execute() - opcode 0x01, sf=1
+        gte.execute(0x00080001);
+
+        // Should have executed RTPS
+        assert_ne!(gte.read_data(GTE::MAC3), 0, "RTPS should have executed");
+    }
+
+    #[test]
+    fn test_execute_nclip_opcode() {
+        let mut gte = GTE::new();
+
+        gte.write_data(GTE::SXY0, 0);
+        gte.write_data(GTE::SXY1, 100);
+        gte.write_data(GTE::SXY2, (50 << 16) | 50);
+
+        // Execute NCLIP - opcode 0x06
+        gte.execute(0x00000006);
+
+        // Should have executed NCLIP
+        assert_ne!(gte.read_data(GTE::MAC0), 0, "NCLIP should have executed");
+    }
+
+    #[test]
+    fn test_execute_rtpt_opcode() {
+        let mut gte = GTE::new();
+
+        gte.write_control(GTE::RT11_RT12, 0x1000);
+        gte.write_control(GTE::RT22_RT23, 0x1000);
+        gte.write_control(GTE::RT33, 0x1000);
+        gte.write_control(GTE::TRZ, 1000);
+        gte.write_control(GTE::H, 1000);
+
+        gte.write_data(GTE::VXY0, 100);
+        gte.write_data(GTE::VZ0, 1000);
+        gte.write_data(GTE::VXY1, 200);
+        gte.write_data(GTE::VZ1, 2000);
+        gte.write_data(GTE::VXY2, 300);
+        gte.write_data(GTE::VZ2, 3000);
+
+        // Execute RTPT - opcode 0x30, sf=1
+        gte.execute(0x00080030);
+
+        // All three screen coordinates should be set
+        assert_ne!(gte.read_data(GTE::SXY0), 0);
+        assert_ne!(gte.read_data(GTE::SXY1), 0);
+        assert_ne!(gte.read_data(GTE::SXY2), 0);
+    }
+
+    #[test]
+    fn test_execute_unknown_opcode() {
+        let mut gte = GTE::new();
+
+        // Execute unknown opcode 0x3F (not implemented)
+        gte.execute(0x0000003F);
+
+        // Should set error flag (bit 31)
+        assert_eq!(
+            gte.flags, 0x80000000,
+            "Unknown opcode should set error flag"
+        );
+        assert_eq!(
+            gte.read_data(GTE::LZCR) as u32,
+            0x80000000,
+            "LZCR should reflect error flag"
+        );
+    }
+
+    // ============================================================================
+    // Edge Cases and Hardware Quirks
+    // ============================================================================
+
+    #[test]
+    fn test_mac_registers_no_saturation() {
+        let mut gte = GTE::new();
+
+        // Set up matrix that will cause overflow
+        gte.write_control(GTE::RT11_RT12, 0x7FFF); // Max value
+        gte.write_control(GTE::RT22_RT23, 0x7FFF);
+        gte.write_control(GTE::RT33, 0x7FFF);
+
+        // Large input vector
+        gte.write_data(GTE::VXY0, (0x7FFF << 16) | 0x7FFF);
+        gte.write_data(GTE::VZ0, 0x7FFF);
+
+        gte.write_control(GTE::TRX, 0x7FFFFFFF);
+        gte.write_control(GTE::TRY, 0x7FFFFFFF);
+        gte.write_control(GTE::TRZ, 1000);
+        gte.write_control(GTE::H, 1000);
+
+        gte.rtps(false);
+
+        // MAC registers can overflow - they should still contain a value
+        // (may be clamped to i32 range but not saturated to smaller range)
+        let _mac1 = gte.read_data(GTE::MAC1);
+        let _mac2 = gte.read_data(GTE::MAC2);
+        let _mac3 = gte.read_data(GTE::MAC3);
+
+        // Just verify they didn't panic - exact values depend on overflow behavior
+    }
+
+    #[test]
+    fn test_ir_registers_saturate() {
+        let mut gte = GTE::new();
+
+        // Large MAC values
+        gte.data[GTE::MAC1] = 100000;
+        gte.data[GTE::MAC2] = -100000;
+        gte.data[GTE::MAC3] = 50000;
+
+        // Manually call rtps which will saturate IR from MAC
+        gte.write_control(GTE::RT11_RT12, 0);
+        gte.write_control(GTE::RT22_RT23, 0);
+        gte.write_control(GTE::RT33, 0x1000);
+        gte.write_control(GTE::TRX, 100000);
+        gte.write_control(GTE::TRY, -100000);
+        gte.write_control(GTE::TRZ, 50000);
+        gte.write_control(GTE::H, 1000);
+
+        gte.write_data(GTE::VXY0, 0);
+        gte.write_data(GTE::VZ0, 0);
+
+        gte.rtps(true);
+
+        // IR registers should be saturated to -32768..32767
+        let ir1 = gte.read_data(GTE::IR1);
+        let ir2 = gte.read_data(GTE::IR2);
+        let ir3 = gte.read_data(GTE::IR3);
+
+        assert!(
+            (-32768..=32767).contains(&ir1),
+            "IR1 not saturated: {}",
+            ir1
+        );
+        assert!(
+            (-32768..=32767).contains(&ir2),
+            "IR2 not saturated: {}",
+            ir2
+        );
+        assert!((0..=65535).contains(&ir3), "IR3 not saturated: {}", ir3);
+    }
+
+    #[test]
+    fn test_sz_fifo_4_stages() {
+        let mut gte = GTE::new();
+
+        gte.write_control(GTE::RT11_RT12, 0x1000);
+        gte.write_control(GTE::RT22_RT23, 0x1000);
+        gte.write_control(GTE::RT33, 0x1000);
+        gte.write_control(GTE::H, 1000);
+
+        // Execute RTPS 4 times to fill SZ FIFO
+        // Note: SZ3 = MAC3 SAR ((1-sf)*12), and MAC3 includes the matrix multiply result
+        // With identity matrix and TRZ: MAC3 = (TRZ << 12) >> 12 = TRZ when VZ=0
+        for z in [100, 200, 300, 400] {
+            gte.write_data(GTE::VXY0, 0);
+            gte.write_data(GTE::VZ0, z);
+            gte.write_control(GTE::TRZ, z);
+            gte.rtps(true);
+        }
+
+        // SZ FIFO should contain results (which will be 2*z due to TRZ+VZ*RT33)
+        // After 4 RTPS: SZ0=200, SZ1=400, SZ2=600, SZ3=800
+        assert_eq!(gte.read_data(GTE::SZ0), 200);
+        assert_eq!(gte.read_data(GTE::SZ1), 400);
+        assert_eq!(gte.read_data(GTE::SZ2), 600);
+        assert_eq!(gte.read_data(GTE::SZ3), 800);
+    }
+
+    #[test]
+    fn test_flags_cleared_on_command_start() {
+        let mut gte = GTE::new();
+
+        // Set flags from previous operation
+        gte.execute(0xFF); // Unknown command sets error flag
+
+        assert_eq!(gte.flags, 0x80000000, "Error flag should be set");
+
+        // Execute valid command
+        gte.write_data(GTE::SXY0, 0);
+        gte.write_data(GTE::SXY1, 100);
+        gte.write_data(GTE::SXY2, 50);
+        gte.nclip();
+
+        // Flags should be cleared at start of NCLIP
+        assert_eq!(gte.flags, 0, "Flags should be cleared on new command");
+    }
+
+    #[test]
+    fn test_rotation_matrix_extraction() {
+        let mut gte = GTE::new();
+
+        // Set rotation matrix with known values
+        // RT11=0x1000 (1.0), RT12=0x0800 (0.5)
+        gte.write_control(GTE::RT11_RT12, (0x0800 << 16) | 0x1000);
+        // RT13=0x0400 (0.25), RT21=0x0200 (0.125)
+        gte.write_control(GTE::RT13_RT21, (0x0200 << 16) | 0x0400);
+        // RT22=0x2000 (2.0), RT23=0x0100
+        gte.write_control(GTE::RT22_RT23, (0x0100 << 16) | 0x2000);
+        // RT31=0x0080, RT32=0x0040
+        gte.write_control(GTE::RT31_RT32, (0x0040 << 16) | 0x0080);
+        // RT33=0x3000 (3.0)
+        gte.write_control(GTE::RT33, 0x3000);
+
+        let matrix = gte.get_rotation_matrix();
+
+        assert_eq!(matrix[0][0], 0x1000);
+        assert_eq!(matrix[0][1], 0x0800);
+        assert_eq!(matrix[0][2], 0x0400);
+        assert_eq!(matrix[1][0], 0x0200);
+        assert_eq!(matrix[1][1], 0x2000);
+        assert_eq!(matrix[1][2], 0x0100);
+        assert_eq!(matrix[2][0], 0x0080);
+        assert_eq!(matrix[2][1], 0x0040);
+        assert_eq!(matrix[2][2], 0x3000);
+    }
+
+    #[test]
+    fn test_negative_matrix_elements() {
+        let mut gte = GTE::new();
+
+        // Set negative rotation matrix elements
+        gte.write_control(
+            GTE::RT11_RT12,
+            (((-0x1000i16 as u16 as u32) << 16) | (-0x1000i16 as u16 as u32)) as i32,
+        );
+        gte.write_control(GTE::RT13_RT21, 0);
+        gte.write_control(GTE::RT22_RT23, (-0x1000i16 as u16 as u32) as i32);
+        gte.write_control(GTE::RT31_RT32, 0);
+        gte.write_control(GTE::RT33, (-0x1000i16 as u16 as u32) as i32);
+
+        let matrix = gte.get_rotation_matrix();
+
+        // Check that negative values are correctly sign-extended
+        assert_eq!(matrix[0][0], -0x1000);
+        assert_eq!(matrix[0][1], -0x1000);
+        assert_eq!(matrix[1][1], -0x1000);
+        assert_eq!(matrix[2][2], -0x1000);
+    }
+
+    #[test]
+    fn test_zero_h_value() {
+        let mut gte = GTE::new();
+
+        gte.write_control(GTE::RT11_RT12, 0x1000);
+        gte.write_control(GTE::RT22_RT23, 0x1000);
+        gte.write_control(GTE::RT33, 0x1000);
+        gte.write_control(GTE::TRZ, 1000);
+        gte.write_control(GTE::H, 0); // Zero projection distance
+
+        gte.write_data(GTE::VXY0, (100 << 16) | 100);
+        gte.write_data(GTE::VZ0, 1000);
+
+        gte.rtps(true);
+
+        // With H=0, projection scale should be zero
+        // Screen coordinates should be at screen offset
+        let sxy2 = gte.read_data(GTE::SXY2);
+        let sx = (sxy2 & 0xFFFF) as i16 as i32;
+        let sy = (sxy2 >> 16) as i16 as i32;
+
+        // Should be close to zero (since OFX=OFY=0)
+        assert!((-100..=100).contains(&sx), "SX with H=0: {}", sx);
+        assert!((-100..=100).contains(&sy), "SY with H=0: {}", sy);
+    }
+}
