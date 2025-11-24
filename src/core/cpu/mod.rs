@@ -578,6 +578,20 @@ impl CPU {
         self.pc
     }
 
+    /// Get HI register value
+    ///
+    /// The HI register contains the upper 32 bits of multiplication/division results
+    pub fn hi(&self) -> u32 {
+        self.hi
+    }
+
+    /// Get LO register value
+    ///
+    /// The LO register contains the lower 32 bits of multiplication/division results
+    pub fn lo(&self) -> u32 {
+        self.lo
+    }
+
     /// Set program counter value
     ///
     /// Sets the PC and next_PC to specified value. This is used when
