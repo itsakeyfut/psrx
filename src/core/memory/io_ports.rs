@@ -946,3 +946,346 @@ impl Bus {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_uninitialized_gpu_read32() {
+        let bus = Bus::new();
+
+        // GPU reads should return 0 when GPU is not initialized
+        assert_eq!(bus.read_io_port32(Bus::GPU_GP0).unwrap(), 0);
+        assert_eq!(bus.read_io_port32(Bus::GPU_GP1).unwrap(), 0);
+    }
+
+    #[test]
+    fn test_uninitialized_gpu_write32() {
+        let mut bus = Bus::new();
+
+        // GPU writes should not panic when GPU is not initialized
+        assert!(bus.write_io_port32(Bus::GPU_GP0, 0x12345678).is_ok());
+        assert!(bus.write_io_port32(Bus::GPU_GP1, 0xABCDEF00).is_ok());
+    }
+
+    #[test]
+    fn test_uninitialized_controller_read32() {
+        let bus = Bus::new();
+
+        // Controller reads should return default values when not initialized
+        assert_eq!(bus.read_io_port32(Bus::JOY_DATA).unwrap(), 0xFF);
+        assert_eq!(bus.read_io_port32(Bus::JOY_STAT).unwrap(), 0x05);
+        assert_eq!(bus.read_io_port32(Bus::JOY_MODE).unwrap(), 0x000D);
+        assert_eq!(bus.read_io_port32(Bus::JOY_CTRL).unwrap(), 0);
+        assert_eq!(bus.read_io_port32(Bus::JOY_BAUD).unwrap(), 0);
+    }
+
+    #[test]
+    fn test_uninitialized_controller_write32() {
+        let mut bus = Bus::new();
+
+        // Controller writes should not panic when not initialized
+        assert!(bus.write_io_port32(Bus::JOY_DATA, 0x42).is_ok());
+        assert!(bus.write_io_port32(Bus::JOY_MODE, 0x0D).is_ok());
+        assert!(bus.write_io_port32(Bus::JOY_CTRL, 0x1003).is_ok());
+        assert!(bus.write_io_port32(Bus::JOY_BAUD, 0x88).is_ok());
+    }
+
+    #[test]
+    fn test_uninitialized_timer_read32() {
+        let bus = Bus::new();
+
+        // Timer reads should return 0 when not initialized
+        assert_eq!(bus.read_io_port32(Bus::TIMER0_COUNTER).unwrap(), 0);
+        assert_eq!(bus.read_io_port32(Bus::TIMER0_MODE).unwrap(), 0);
+        assert_eq!(bus.read_io_port32(Bus::TIMER0_TARGET).unwrap(), 0);
+        assert_eq!(bus.read_io_port32(Bus::TIMER1_COUNTER).unwrap(), 0);
+        assert_eq!(bus.read_io_port32(Bus::TIMER1_MODE).unwrap(), 0);
+        assert_eq!(bus.read_io_port32(Bus::TIMER1_TARGET).unwrap(), 0);
+        assert_eq!(bus.read_io_port32(Bus::TIMER2_COUNTER).unwrap(), 0);
+        assert_eq!(bus.read_io_port32(Bus::TIMER2_MODE).unwrap(), 0);
+        assert_eq!(bus.read_io_port32(Bus::TIMER2_TARGET).unwrap(), 0);
+    }
+
+    #[test]
+    fn test_uninitialized_timer_write32() {
+        let mut bus = Bus::new();
+
+        // Timer writes should not panic when not initialized
+        assert!(bus.write_io_port32(Bus::TIMER0_COUNTER, 0).is_ok());
+        assert!(bus.write_io_port32(Bus::TIMER0_MODE, 0x0100).is_ok());
+        assert!(bus.write_io_port32(Bus::TIMER0_TARGET, 0xFFFF).is_ok());
+        assert!(bus.write_io_port32(Bus::TIMER1_COUNTER, 0).is_ok());
+        assert!(bus.write_io_port32(Bus::TIMER1_MODE, 0x0100).is_ok());
+        assert!(bus.write_io_port32(Bus::TIMER1_TARGET, 0xFFFF).is_ok());
+        assert!(bus.write_io_port32(Bus::TIMER2_COUNTER, 0).is_ok());
+        assert!(bus.write_io_port32(Bus::TIMER2_MODE, 0x0100).is_ok());
+        assert!(bus.write_io_port32(Bus::TIMER2_TARGET, 0xFFFF).is_ok());
+    }
+
+    #[test]
+    fn test_uninitialized_interrupt_read32() {
+        let bus = Bus::new();
+
+        // Interrupt reads should return 0 when not initialized
+        assert_eq!(bus.read_io_port32(Bus::I_STAT).unwrap(), 0);
+        assert_eq!(bus.read_io_port32(Bus::I_MASK).unwrap(), 0);
+    }
+
+    #[test]
+    fn test_uninitialized_interrupt_write32() {
+        let mut bus = Bus::new();
+
+        // Interrupt writes should not panic when not initialized
+        assert!(bus.write_io_port32(Bus::I_STAT, 0xFFFF).is_ok());
+        assert!(bus.write_io_port32(Bus::I_MASK, 0x03FF).is_ok());
+    }
+
+    #[test]
+    fn test_uninitialized_dma_read32() {
+        let bus = Bus::new();
+
+        // DMA channel reads should return 0 when not initialized
+        for channel in 0..7 {
+            let base = 0x1F801080 + (channel * 0x10);
+            assert_eq!(bus.read_io_port32(base).unwrap(), 0); // MADR
+            assert_eq!(bus.read_io_port32(base + 0x04).unwrap(), 0); // BCR
+            assert_eq!(bus.read_io_port32(base + 0x08).unwrap(), 0); // CHCR
+        }
+
+        // DMA control registers should return default values
+        assert_eq!(bus.read_io_port32(Bus::DMA_DPCR).unwrap(), 0x07654321);
+        assert_eq!(bus.read_io_port32(Bus::DMA_DICR).unwrap(), 0);
+    }
+
+    #[test]
+    fn test_uninitialized_dma_write32() {
+        let mut bus = Bus::new();
+
+        // DMA channel writes should not panic when not initialized
+        for channel in 0..7 {
+            let base = 0x1F801080 + (channel * 0x10);
+            assert!(bus.write_io_port32(base, 0x00000000).is_ok()); // MADR
+            assert!(bus.write_io_port32(base + 0x04, 0x00100010).is_ok()); // BCR
+            assert!(bus.write_io_port32(base + 0x08, 0x01000201).is_ok()); // CHCR
+        }
+
+        // DMA control registers
+        assert!(bus.write_io_port32(Bus::DMA_DPCR, 0x07654321).is_ok());
+        assert!(bus.write_io_port32(Bus::DMA_DICR, 0x00FF803F).is_ok());
+    }
+
+    #[test]
+    fn test_uninitialized_cdrom_read8() {
+        let bus = Bus::new();
+
+        // CDROM reads should return default values when not initialized
+        assert_eq!(bus.read_io_port8(Bus::CDROM_INDEX).unwrap(), 0x18);
+        assert_eq!(bus.read_io_port8(Bus::CDROM_REG1).unwrap(), 0);
+        assert_eq!(bus.read_io_port8(Bus::CDROM_REG2).unwrap(), 0);
+        assert_eq!(bus.read_io_port8(Bus::CDROM_REG3).unwrap(), 0);
+    }
+
+    #[test]
+    fn test_uninitialized_cdrom_write8() {
+        let mut bus = Bus::new();
+
+        // CDROM writes should not panic when not initialized
+        assert!(bus.write_io_port8(Bus::CDROM_INDEX, 0x01).is_ok());
+        assert!(bus.write_io_port8(Bus::CDROM_REG1, 0x01).is_ok());
+        assert!(bus.write_io_port8(Bus::CDROM_REG2, 0x07).is_ok());
+        assert!(bus.write_io_port8(Bus::CDROM_REG3, 0x1F).is_ok());
+    }
+
+    #[test]
+    fn test_uninitialized_spu_read16() {
+        let bus = Bus::new();
+
+        // SPU reads should return 0 when not initialized
+        assert_eq!(bus.read_io_port16(0x1F801C00).unwrap(), 0);
+        assert_eq!(bus.read_io_port16(0x1F801D80).unwrap(), 0);
+        assert_eq!(bus.read_io_port16(0x1F801FFE).unwrap(), 0);
+    }
+
+    #[test]
+    fn test_uninitialized_spu_write16() {
+        let mut bus = Bus::new();
+
+        // SPU writes should not panic when not initialized
+        assert!(bus.write_io_port16(0x1F801C00, 0x0000).is_ok());
+        assert!(bus.write_io_port16(0x1F801D80, 0xC000).is_ok());
+        assert!(bus.write_io_port16(0x1F801FFE, 0xFFFF).is_ok());
+    }
+
+    #[test]
+    fn test_unknown_io_port_read32() {
+        let bus = Bus::new();
+
+        // Unknown I/O port reads should return 0
+        assert_eq!(bus.read_io_port32(0x1F801FFC).unwrap(), 0);
+        assert_eq!(bus.read_io_port32(0x1F802FFC).unwrap(), 0);
+    }
+
+    #[test]
+    fn test_unknown_io_port_write32() {
+        let mut bus = Bus::new();
+
+        // Unknown I/O port writes should succeed (ignored)
+        assert!(bus.write_io_port32(0x1F801FFC, 0xDEADBEEF).is_ok());
+        assert!(bus.write_io_port32(0x1F802FFC, 0xCAFEBABE).is_ok());
+    }
+
+    #[test]
+    fn test_unknown_io_port_read8() {
+        let bus = Bus::new();
+
+        // Unknown I/O port reads should return 0
+        assert_eq!(bus.read_io_port8(0x1F801FFC).unwrap(), 0);
+        assert_eq!(bus.read_io_port8(0x1F802FFC).unwrap(), 0);
+    }
+
+    #[test]
+    fn test_unknown_io_port_write8() {
+        let mut bus = Bus::new();
+
+        // Unknown I/O port writes should succeed (ignored)
+        assert!(bus.write_io_port8(0x1F801FFC, 0xFF).is_ok());
+        assert!(bus.write_io_port8(0x1F802FFC, 0xAB).is_ok());
+    }
+
+    #[test]
+    fn test_unknown_io_port_read16() {
+        let bus = Bus::new();
+
+        // Unknown I/O port reads should return 0
+        assert_eq!(bus.read_io_port16(0x1F801FFC).unwrap(), 0);
+        assert_eq!(bus.read_io_port16(0x1F802FFC).unwrap(), 0);
+    }
+
+    #[test]
+    fn test_unknown_io_port_write16() {
+        let mut bus = Bus::new();
+
+        // Unknown I/O port writes should succeed (ignored)
+        assert!(bus.write_io_port16(0x1F801FFC, 0xFFFF).is_ok());
+        assert!(bus.write_io_port16(0x1F802FFC, 0xABCD).is_ok());
+    }
+
+    #[test]
+    fn test_io_port_address_constants() {
+        // Verify that I/O port address constants are correct
+        assert_eq!(Bus::GPU_GP0, 0x1F801810);
+        assert_eq!(Bus::GPU_GP1, 0x1F801814);
+        assert_eq!(Bus::JOY_DATA, 0x1F801040);
+        assert_eq!(Bus::JOY_STAT, 0x1F801044);
+        assert_eq!(Bus::JOY_MODE, 0x1F801048);
+        assert_eq!(Bus::JOY_CTRL, 0x1F80104A);
+        assert_eq!(Bus::JOY_BAUD, 0x1F80104E);
+        assert_eq!(Bus::I_STAT, 0x1F801070);
+        assert_eq!(Bus::I_MASK, 0x1F801074);
+        assert_eq!(Bus::DMA_DPCR, 0x1F8010F0);
+        assert_eq!(Bus::DMA_DICR, 0x1F8010F4);
+        assert_eq!(Bus::TIMER0_COUNTER, 0x1F801100);
+        assert_eq!(Bus::TIMER0_MODE, 0x1F801104);
+        assert_eq!(Bus::TIMER0_TARGET, 0x1F801108);
+        assert_eq!(Bus::TIMER1_COUNTER, 0x1F801110);
+        assert_eq!(Bus::TIMER1_MODE, 0x1F801114);
+        assert_eq!(Bus::TIMER1_TARGET, 0x1F801118);
+        assert_eq!(Bus::TIMER2_COUNTER, 0x1F801120);
+        assert_eq!(Bus::TIMER2_MODE, 0x1F801124);
+        assert_eq!(Bus::TIMER2_TARGET, 0x1F801128);
+        assert_eq!(Bus::CDROM_INDEX, 0x1F801800);
+        assert_eq!(Bus::CDROM_REG1, 0x1F801801);
+        assert_eq!(Bus::CDROM_REG2, 0x1F801802);
+        assert_eq!(Bus::CDROM_REG3, 0x1F801803);
+    }
+
+    #[test]
+    fn test_dma_channel_address_ranges() {
+        // Test that all DMA channels have correct address ranges
+        for channel in 0..7 {
+            let base = 0x1F801080 + (channel * 0x10);
+
+            // Each channel should be within the DMA region
+            assert!(
+                (0x1F801080..=0x1F8010EF).contains(&base),
+                "DMA channel {} base address 0x{:08X} out of range",
+                channel,
+                base
+            );
+        }
+    }
+
+    #[test]
+    fn test_dma_invalid_register_offset() {
+        let bus = Bus::new();
+
+        // Test invalid register offsets within DMA channel (only 0x00, 0x04, 0x08 are valid)
+        let result = bus.read_io_port32(0x1F801080 + 0x0C);
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), 0); // Invalid offset should return 0
+    }
+
+    #[test]
+    fn test_spu_address_range() {
+        let bus = Bus::new();
+
+        // SPU registers span 0x1F801C00-0x1F801FFF
+        // Test start of range
+        assert_eq!(bus.read_io_port16(0x1F801C00).unwrap(), 0);
+
+        // Test end of range
+        assert_eq!(bus.read_io_port16(0x1F801FFE).unwrap(), 0);
+
+        // Test middle of range
+        assert_eq!(bus.read_io_port16(0x1F801D00).unwrap(), 0);
+    }
+
+    #[test]
+    fn test_io_port_size_specific_routing() {
+        let bus = Bus::new();
+
+        // Test that 32-bit, 16-bit, and 8-bit accesses are routed correctly
+        // GPU uses 32-bit
+        assert_eq!(bus.read_io_port32(Bus::GPU_GP0).unwrap(), 0);
+
+        // CDROM uses 8-bit
+        assert_eq!(bus.read_io_port8(Bus::CDROM_INDEX).unwrap(), 0x18);
+
+        // SPU uses 16-bit
+        assert_eq!(bus.read_io_port16(0x1F801C00).unwrap(), 0);
+    }
+
+    #[test]
+    fn test_io_port_boundary_addresses() {
+        let bus = Bus::new();
+
+        // Test at exact register boundaries
+        // GPU registers are 4 bytes apart
+        assert_eq!(bus.read_io_port32(0x1F801810).unwrap(), 0);
+        assert_eq!(bus.read_io_port32(0x1F801814).unwrap(), 0);
+
+        // Timer registers are 4 bytes each, with 16-byte channel spacing
+        assert_eq!(bus.read_io_port32(0x1F801100).unwrap(), 0);
+        assert_eq!(bus.read_io_port32(0x1F801104).unwrap(), 0);
+        assert_eq!(bus.read_io_port32(0x1F801108).unwrap(), 0);
+        assert_eq!(bus.read_io_port32(0x1F801110).unwrap(), 0);
+        assert_eq!(bus.read_io_port32(0x1F801120).unwrap(), 0);
+    }
+
+    #[test]
+    fn test_fallback_values_consistency() {
+        let bus = Bus::new();
+
+        // Verify fallback values are consistent with PSX documentation
+        // Controller STAT should indicate ready (bit 0 = TX ready, bit 2 = RX ready)
+        assert_eq!(bus.read_io_port32(Bus::JOY_STAT).unwrap(), 0x05);
+
+        // CDROM status should indicate FIFO states
+        assert_eq!(bus.read_io_port8(Bus::CDROM_INDEX).unwrap(), 0x18);
+
+        // DMA DPCR default priority values
+        assert_eq!(bus.read_io_port32(Bus::DMA_DPCR).unwrap(), 0x07654321);
+    }
+}
