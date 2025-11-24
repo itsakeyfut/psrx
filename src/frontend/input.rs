@@ -330,9 +330,25 @@ impl Default for InputHandler {
 mod tests {
     use super::*;
 
+    /// Helper function to create an InputHandler with default config for testing.
+    /// This bypasses file I/O to ensure tests are deterministic regardless of local config files.
+    fn new_test_handler() -> InputHandler {
+        let config = InputConfig::default_config();
+        let mut key_mapping = HashMap::new();
+        for (key_str, button) in config.key_mapping {
+            if let Some(key) = string_to_keycode(&key_str) {
+                key_mapping.insert(key, button);
+            }
+        }
+        InputHandler {
+            key_mapping,
+            config_path: "test-config.toml".to_string(),
+        }
+    }
+
     #[test]
     fn test_default_keyboard_mapping() {
-        let handler = InputHandler::new();
+        let handler = new_test_handler();
 
         // Test D-Pad mappings
         assert_eq!(
@@ -368,7 +384,7 @@ mod tests {
 
     #[test]
     fn test_set_key_mapping() {
-        let mut handler = InputHandler::new();
+        let mut handler = new_test_handler();
 
         // Change mapping
         handler.set_key_mapping(KeyCode::KeyP, buttons::START);
@@ -380,7 +396,7 @@ mod tests {
 
     #[test]
     fn test_detect_conflicts() {
-        let handler = InputHandler::new();
+        let handler = new_test_handler();
 
         // Default config has intentional "conflicts" (multiple keys for same button)
         let conflicts = handler.detect_conflicts();
@@ -398,7 +414,7 @@ mod tests {
 
     #[test]
     fn test_remove_key_mapping() {
-        let mut handler = InputHandler::new();
+        let mut handler = new_test_handler();
 
         // Remove a mapping
         handler.remove_key_mapping(KeyCode::KeyW);
@@ -413,7 +429,7 @@ mod tests {
 
     #[test]
     fn test_get_button_mappings() {
-        let handler = InputHandler::new();
+        let handler = new_test_handler();
         let mappings = handler.get_button_mappings();
 
         // Should have mappings for all buttons
