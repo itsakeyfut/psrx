@@ -22,6 +22,7 @@ use crate::core::system::System;
 use crate::frontend::frame_timer::FrameTimer;
 use crate::frontend::input::InputHandler;
 use crate::frontend::renderer::{DisplayRenderer, RenderContext};
+use crate::frontend::ui::{UiAction, UiState};
 use std::sync::Arc;
 use winit::{
     application::ApplicationHandler,
@@ -60,6 +61,10 @@ pub struct Application {
     input_handler: InputHandler,
     /// Show input configuration UI
     show_input_config: bool,
+    /// UI state manager
+    ui_state: UiState,
+    /// Exit requested flag
+    exit_requested: bool,
 }
 
 impl Application {
@@ -100,6 +105,8 @@ impl Application {
             bios_path: bios_path.to_string(),
             input_handler,
             show_input_config: false,
+            ui_state: UiState::new(),
+            exit_requested: false,
         }
     }
 
@@ -189,6 +196,105 @@ impl Application {
         self.show_input_config = !self.show_input_config;
     }
 
+    /// Handle UI action
+    ///
+    /// Processes actions triggered from the UI (menu bar, buttons, etc.)
+    fn handle_ui_action(&mut self, action: UiAction) {
+        match action {
+            UiAction::None => {}
+            UiAction::TogglePause => {
+                self.toggle_pause();
+            }
+            UiAction::StepFrame => {
+                self.step_frame();
+            }
+            UiAction::Reset => {
+                self.reset();
+            }
+            UiAction::ToggleFullscreen => {
+                self.toggle_fullscreen();
+            }
+            UiAction::LoadBios => {
+                self.open_bios_dialog();
+            }
+            UiAction::LoadDisc => {
+                self.open_disc_dialog();
+            }
+            UiAction::Exit => {
+                // Set exit flag - will be handled in the event loop
+                self.exit_requested = true;
+                log::info!("Exit requested from UI");
+            }
+            UiAction::EnableCpuTracing => {
+                log::info!("CPU tracing requested (not yet implemented)");
+                // TODO: Implement CPU tracing enable
+            }
+            UiAction::DumpVram => {
+                self.dump_vram_to_file();
+            }
+            UiAction::ToggleInputConfig => {
+                self.toggle_input_config();
+            }
+        }
+    }
+
+    /// Open BIOS file dialog
+    fn open_bios_dialog(&mut self) {
+        let path = rfd::FileDialog::new()
+            .add_filter("BIOS", &["bin", "BIN"])
+            .set_title("Select BIOS file")
+            .pick_file();
+
+        if let Some(path) = path {
+            if let Some(path_str) = path.to_str() {
+                if let Some(ref mut system) = self.system {
+                    match system.load_bios(path_str) {
+                        Ok(_) => {
+                            system.reset();
+                            self.bios_path = path_str.to_string();
+                            log::info!("Loaded BIOS: {}", path_str);
+                        }
+                        Err(e) => {
+                            log::error!("Failed to load BIOS: {}", e);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// Open disc image file dialog
+    fn open_disc_dialog(&mut self) {
+        let path = rfd::FileDialog::new()
+            .add_filter("Disc Image", &["cue", "CUE", "bin", "BIN", "iso", "ISO"])
+            .set_title("Select disc image")
+            .pick_file();
+
+        if let Some(path) = path {
+            if let Some(path_str) = path.to_str() {
+                log::info!("Disc loading requested: {} (not yet implemented)", path_str);
+                // TODO: Implement disc loading in future phase
+            }
+        }
+    }
+
+    /// Dump VRAM to file
+    fn dump_vram_to_file(&mut self) {
+        if let Some(ref _system) = self.system {
+            let path = rfd::FileDialog::new()
+                .add_filter("PNG Image", &["png"])
+                .set_title("Save VRAM dump")
+                .set_file_name("vram_dump.png")
+                .save_file();
+
+            if let Some(_path) = path {
+                log::info!("VRAM dump requested (not yet implemented)");
+                // TODO: Implement VRAM dumping to PNG
+                // This would require image encoding library like `image` or `png`
+            }
+        }
+    }
+
     /// Render a frame
     ///
     /// This method handles:
@@ -251,74 +357,16 @@ impl Application {
         // Begin egui frame
         let raw_input = egui_state.take_egui_input(window);
         let paused = self.paused;
-        let fps = self.frame_timer.fps();
-        let frame_time_ms = self.frame_timer.frame_time_ms();
-        let frame_count = self.frame_timer.frame_count();
-
         let show_input_config = self.show_input_config;
         let input_handler = &self.input_handler;
 
-        // Track if we need to toggle input config
+        // Track UI actions and state changes
+        let mut ui_action = UiAction::None;
         let mut should_toggle_input_config = false;
 
         let full_output = self.egui_ctx.run(raw_input, |ctx| {
-            // Create a simple UI panel
-            egui::CentralPanel::default().show(ctx, |ui| {
-                ui.heading("PSRX - PlayStation Emulator");
-                ui.separator();
-
-                // Emulation status
-                ui.horizontal(|ui| {
-                    ui.label("Status:");
-                    if paused {
-                        ui.colored_label(egui::Color32::YELLOW, "⏸ Paused");
-                    } else {
-                        ui.colored_label(egui::Color32::GREEN, "▶ Running");
-                    }
-                });
-
-                ui.separator();
-
-                // Performance metrics
-                ui.heading("Performance");
-                ui.label(format!("FPS: {:.1}", fps));
-                ui.label(format!("Frame Time: {:.2} ms", frame_time_ms));
-                ui.label(format!("Frame Count: {}", frame_count));
-
-                ui.separator();
-
-                // Controls
-                ui.heading("Controls");
-                ui.label("Space: Pause/Resume");
-                ui.label("F10: Step Frame (when paused)");
-                ui.label("F5: Reset");
-                ui.label("F11: Toggle Fullscreen");
-                ui.label("F12: Screenshot (not yet implemented)");
-
-                ui.separator();
-
-                // Input configuration button
-                if ui.button("Configure Input").clicked() {
-                    should_toggle_input_config = true;
-                }
-
-                // Add some debug info
-                ui.separator();
-                ui.collapsing("Debug Info", |ui| {
-                    ui.label(format!(
-                        "Surface: {}x{}",
-                        render_context.surface_config.width, render_context.surface_config.height
-                    ));
-                    ui.label(format!(
-                        "Format: {:?}",
-                        render_context.surface_config.format
-                    ));
-                    ui.label(format!(
-                        "Present Mode: {:?}",
-                        render_context.surface_config.present_mode
-                    ));
-                });
-            });
+            // Render the debug UI (menu bar, status bar, debug panels)
+            ui_action = self.ui_state.render(ctx, system, &self.frame_timer, paused);
 
             // Input configuration window
             if show_input_config {
@@ -487,6 +535,9 @@ impl Application {
         // Present frame
         output.present();
 
+        // Handle UI actions after all borrows are released
+        self.handle_ui_action(ui_action);
+
         Ok(())
     }
 }
@@ -633,6 +684,12 @@ impl ApplicationHandler for Application {
                 }
             }
             _ => {}
+        }
+
+        // Check if exit was requested from UI
+        if self.exit_requested {
+            log::info!("Exiting application");
+            event_loop.exit();
         }
     }
 

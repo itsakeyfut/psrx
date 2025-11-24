@@ -51,6 +51,8 @@ egui = "0.33.2"
 egui-wgpu = "0.33.2"
 egui-winit = "0.33.2"
 pollster = "0.4"
+rfd = "0.15.4"
+open = "5.3.3"
 
 [dev-dependencies]
 # Testing

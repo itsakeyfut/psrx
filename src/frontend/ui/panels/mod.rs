@@ -13,18 +13,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Rendering module
+//! UI panels module
 //!
-//! This module provides rendering functionality for the PSRX frontend,
-//! including wgpu context management and rendering operations.
+//! This module contains all debug UI panels: menu bar, status bar, and debug panels.
 
-pub mod context;
-pub mod display_renderer;
-pub mod vram_texture;
-
-pub use context::RenderContext;
-pub use display_renderer::DisplayRenderer;
-pub use vram_texture::{convert_rgb15_to_rgba8, VramTexture};
-
-#[cfg(test)]
-mod tests;
+pub mod cpu_panel;
+pub mod gpu_panel;
+pub mod memory_panel;
+pub mod menu_bar;
+pub mod status_bar;
