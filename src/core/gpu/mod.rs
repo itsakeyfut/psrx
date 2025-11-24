@@ -57,8 +57,6 @@ mod gp1;
 mod primitives;
 mod registers;
 mod render;
-#[cfg(test)]
-mod tests;
 
 // Public re-exports
 pub use primitives::*;

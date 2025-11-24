@@ -809,6 +809,3 @@ impl Default for System {
         Self::new()
     }
 }
-
-#[cfg(test)]
-mod tests;

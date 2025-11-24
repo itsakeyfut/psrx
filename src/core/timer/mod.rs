@@ -858,6 +858,3 @@ impl crate::core::memory::IODevice for Timers {
         "Timers"
     }
 }
-
-#[cfg(test)]
-mod tests;

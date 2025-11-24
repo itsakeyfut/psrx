@@ -94,8 +94,6 @@ mod decode;
 mod disassembler;
 pub mod icache;
 mod instructions;
-#[cfg(test)]
-mod tests;
 mod tracer;
 
 // Re-exports

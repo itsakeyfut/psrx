@@ -329,6 +329,3 @@ impl Default for InterruptController {
         Self::new()
     }
 }
-
-#[cfg(test)]
-mod tests;

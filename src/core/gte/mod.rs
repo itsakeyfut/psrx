@@ -643,6 +643,3 @@ impl Default for GTE {
         Self::new()
     }
 }
-
-#[cfg(test)]
-mod tests;

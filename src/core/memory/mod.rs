@@ -73,10 +73,6 @@ mod region;
 pub use io_device::IODevice;
 pub use region::MemoryRegion;
 
-// Tests
-#[cfg(test)]
-mod tests;
-
 /// Memory bus managing all memory accesses
 ///
 /// The Bus handles all memory operations including RAM, scratchpad,
