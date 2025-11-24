@@ -46,3 +46,6 @@ pub use frame_timer::FrameTimer;
 pub use input::InputHandler;
 pub use renderer::RenderContext;
 pub use ui::UiState;
+
+#[cfg(test)]
+mod tests;
