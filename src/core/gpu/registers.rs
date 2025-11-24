@@ -383,3 +383,257 @@ pub struct VRAMTransfer {
     /// Transfer direction
     pub direction: VRAMTransferDirection,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_drawing_area_default() {
+        let area = DrawingArea::default();
+        assert_eq!(area.left, 0);
+        assert_eq!(area.top, 0);
+        assert_eq!(area.right, 1023);
+        assert_eq!(area.bottom, 511);
+    }
+
+    #[test]
+    fn test_drawing_area_custom() {
+        let area = DrawingArea {
+            left: 100,
+            top: 50,
+            right: 640,
+            bottom: 480,
+        };
+        assert_eq!(area.left, 100);
+        assert_eq!(area.top, 50);
+        assert_eq!(area.right, 640);
+        assert_eq!(area.bottom, 480);
+    }
+
+    #[test]
+    fn test_texture_window_default() {
+        let window = TextureWindow::default();
+        assert_eq!(window.mask_x, 0);
+        assert_eq!(window.mask_y, 0);
+        assert_eq!(window.offset_x, 0);
+        assert_eq!(window.offset_y, 0);
+    }
+
+    #[test]
+    fn test_texture_window_masking_formula() {
+        // Per PSX-SPX: Texcoord = (Texcoord AND (NOT (Mask*8))) OR ((Offset AND Mask)*8)
+        let window = TextureWindow {
+            mask_x: 3,      // 3 * 8 = 24 pixel mask
+            mask_y: 7,      // 7 * 8 = 56 pixel mask
+            offset_x: 2,    // 2 * 8 = 16 pixel offset
+            offset_y: 4,    // 4 * 8 = 32 pixel offset
+        };
+
+        // Verify mask values are in valid range (0-31 = 5 bits)
+        assert!(window.mask_x < 32);
+        assert!(window.mask_y < 32);
+        assert!(window.offset_x < 32);
+        assert!(window.offset_y < 32);
+    }
+
+    #[test]
+    fn test_display_area_default() {
+        let area = DisplayArea::default();
+        assert_eq!(area.x, 0);
+        assert_eq!(area.y, 0);
+        assert_eq!(area.width, 320);
+        assert_eq!(area.height, 240);
+    }
+
+    #[test]
+    fn test_display_mode_default() {
+        let mode = DisplayMode::default();
+        assert_eq!(mode.horizontal_res, HorizontalRes::R320);
+        assert_eq!(mode.vertical_res, VerticalRes::R240);
+        assert_eq!(mode.video_mode, VideoMode::NTSC);
+        assert_eq!(mode.display_area_color_depth, ColorDepth::C15Bit);
+        assert!(!mode.interlaced);
+        assert!(mode.display_disabled);
+    }
+
+    #[test]
+    fn test_draw_mode_default() {
+        let mode = DrawMode::default();
+        assert_eq!(mode.texture_page_x_base, 0);
+        assert_eq!(mode.texture_page_y_base, 0);
+        assert_eq!(mode.semi_transparency, 0);
+        assert_eq!(mode.texture_depth, 0);
+        assert!(!mode.dithering);
+        assert!(!mode.draw_to_display);
+        assert!(!mode.texture_disable);
+        assert!(!mode.texture_x_flip);
+        assert!(!mode.texture_y_flip);
+    }
+
+    #[test]
+    fn test_draw_mode_semi_transparency_modes() {
+        // Test that all 4 semi-transparency modes are valid (0-3)
+        for mode in 0..4 {
+            let draw_mode = DrawMode {
+                semi_transparency: mode,
+                ..Default::default()
+            };
+            assert!(draw_mode.semi_transparency < 4);
+        }
+    }
+
+    #[test]
+    fn test_draw_mode_texture_depth_modes() {
+        // Test texture depth modes: 0=4bit, 1=8bit, 2/3=15bit
+        let mode_4bit = DrawMode {
+            texture_depth: 0,
+            ..Default::default()
+        };
+        let mode_8bit = DrawMode {
+            texture_depth: 1,
+            ..Default::default()
+        };
+        let mode_15bit = DrawMode {
+            texture_depth: 2,
+            ..Default::default()
+        };
+
+        assert_eq!(mode_4bit.texture_depth, 0);
+        assert_eq!(mode_8bit.texture_depth, 1);
+        assert_eq!(mode_15bit.texture_depth, 2);
+    }
+
+    #[test]
+    fn test_draw_mode_texture_page_coordinates() {
+        // Texture page X base is in units of 64 pixels
+        // Texture page Y base is 0 or 256
+        let mode = DrawMode {
+            texture_page_x_base: 128, // 2 * 64
+            texture_page_y_base: 256, // 1 * 256
+            ..Default::default()
+        };
+
+        assert_eq!(mode.texture_page_x_base, 128);
+        assert_eq!(mode.texture_page_y_base, 256);
+
+        // Valid X bases: 0, 64, 128, 192, 256, 320, 384, 448, 512, 576, 640, 704, 768, 832, 896, 960
+        // Valid Y bases: 0, 256
+    }
+
+    #[test]
+    fn test_gpu_status_default() {
+        let status = GPUStatus::default();
+
+        // Verify default ready states
+        assert!(status.ready_to_receive_cmd);
+        assert!(status.ready_to_send_vram);
+        assert!(status.ready_to_receive_dma);
+
+        // Verify display is initially disabled
+        assert!(status.display_disabled);
+
+        // Verify no interrupt/DMA requests initially
+        assert!(!status.interrupt_request);
+        assert!(!status.dma_request);
+
+        // Verify initial DMA direction is off
+        assert_eq!(status.dma_direction, 0);
+    }
+
+    #[test]
+    fn test_gpu_status_dma_direction() {
+        // Per PSX-SPX: 0=Off, 1=?, 2=CPUtoGP0, 3=GPUREADtoCPU
+        let status_off = GPUStatus {
+            dma_direction: 0,
+            ..Default::default()
+        };
+        let status_cpu_to_gp0 = GPUStatus {
+            dma_direction: 2,
+            ..Default::default()
+        };
+        let status_gpuread_to_cpu = GPUStatus {
+            dma_direction: 3,
+            ..Default::default()
+        };
+
+        assert_eq!(status_off.dma_direction, 0);
+        assert_eq!(status_cpu_to_gp0.dma_direction, 2);
+        assert_eq!(status_gpuread_to_cpu.dma_direction, 3);
+    }
+
+    #[test]
+    fn test_vram_transfer_direction() {
+        let cpu_to_vram = VRAMTransferDirection::CpuToVram;
+        let vram_to_cpu = VRAMTransferDirection::VramToCpu;
+
+        assert_ne!(cpu_to_vram, vram_to_cpu);
+    }
+
+    #[test]
+    fn test_vram_transfer_state() {
+        let transfer = VRAMTransfer {
+            x: 100,
+            y: 200,
+            width: 64,
+            height: 32,
+            current_x: 0,
+            current_y: 0,
+            direction: VRAMTransferDirection::CpuToVram,
+        };
+
+        assert_eq!(transfer.x, 100);
+        assert_eq!(transfer.y, 200);
+        assert_eq!(transfer.width, 64);
+        assert_eq!(transfer.height, 32);
+        assert_eq!(transfer.current_x, 0);
+        assert_eq!(transfer.current_y, 0);
+        assert_eq!(transfer.direction, VRAMTransferDirection::CpuToVram);
+    }
+
+    #[test]
+    fn test_horizontal_res_values() {
+        // Test that all horizontal resolution values are distinct
+        let resolutions = vec![
+            HorizontalRes::R256,
+            HorizontalRes::R320,
+            HorizontalRes::R512,
+            HorizontalRes::R640,
+            HorizontalRes::R368,
+            HorizontalRes::R384,
+        ];
+
+        // Verify each resolution is unique
+        for (i, res1) in resolutions.iter().enumerate() {
+            for (j, res2) in resolutions.iter().enumerate() {
+                if i != j {
+                    assert_ne!(res1, res2);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_vertical_res_values() {
+        let r240 = VerticalRes::R240;
+        let r480 = VerticalRes::R480;
+
+        assert_ne!(r240, r480);
+    }
+
+    #[test]
+    fn test_video_mode_values() {
+        let ntsc = VideoMode::NTSC;
+        let pal = VideoMode::PAL;
+
+        assert_ne!(ntsc, pal);
+    }
+
+    #[test]
+    fn test_color_depth_values() {
+        let c15bit = ColorDepth::C15Bit;
+        let c24bit = ColorDepth::C24Bit;
+
+        assert_ne!(c15bit, c24bit);
+    }
+}

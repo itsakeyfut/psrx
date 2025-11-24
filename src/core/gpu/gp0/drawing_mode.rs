@@ -360,3 +360,250 @@ impl GPU {
         );
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_draw_mode_texture_page() {
+        let mut gpu = GPU::new();
+
+        // Set texture page to X=128 (2×64), Y=256 (1×256)
+        gpu.write_gp0(0xE1000012); // X=2, Y=1
+
+        assert_eq!(gpu.draw_mode.texture_page_x_base, 128);
+        assert_eq!(gpu.draw_mode.texture_page_y_base, 256);
+        assert_eq!(gpu.status.texture_page_x_base, 2);
+        assert_eq!(gpu.status.texture_page_y_base, 1);
+    }
+
+    #[test]
+    fn test_draw_mode_semi_transparency() {
+        let mut gpu = GPU::new();
+
+        // Test all 4 semi-transparency modes
+        for mode in 0..4 {
+            gpu.write_gp0(0xE1000000 | (mode << 5));
+            assert_eq!(gpu.draw_mode.semi_transparency, mode as u8);
+            assert_eq!(gpu.status.semi_transparency, mode as u8);
+        }
+    }
+
+    #[test]
+    fn test_draw_mode_texture_depth() {
+        let mut gpu = GPU::new();
+
+        // 4-bit
+        gpu.write_gp0(0xE1000000);
+        assert_eq!(gpu.draw_mode.texture_depth, 0);
+
+        // 8-bit
+        gpu.write_gp0(0xE1000080);
+        assert_eq!(gpu.draw_mode.texture_depth, 1);
+
+        // 15-bit
+        gpu.write_gp0(0xE1000100);
+        assert_eq!(gpu.draw_mode.texture_depth, 2);
+    }
+
+    #[test]
+    fn test_draw_mode_dithering() {
+        let mut gpu = GPU::new();
+
+        // Disable dithering
+        gpu.write_gp0(0xE1000000);
+        assert!(!gpu.draw_mode.dithering);
+
+        // Enable dithering
+        gpu.write_gp0(0xE1000200);
+        assert!(gpu.draw_mode.dithering);
+    }
+
+    #[test]
+    fn test_draw_mode_texture_disable() {
+        let mut gpu = GPU::new();
+
+        // Enable texture
+        gpu.write_gp0(0xE1000000);
+        assert!(!gpu.draw_mode.texture_disable);
+
+        // Disable texture (draw solid colors)
+        gpu.write_gp0(0xE1000800);
+        assert!(gpu.draw_mode.texture_disable);
+    }
+
+    #[test]
+    fn test_draw_mode_texture_flip() {
+        let mut gpu = GPU::new();
+
+        // X-flip only
+        gpu.write_gp0(0xE1001000);
+        assert!(gpu.draw_mode.texture_x_flip);
+        assert!(!gpu.draw_mode.texture_y_flip);
+
+        // Y-flip only
+        gpu.write_gp0(0xE1002000);
+        assert!(!gpu.draw_mode.texture_x_flip);
+        assert!(gpu.draw_mode.texture_y_flip);
+
+        // Both flips
+        gpu.write_gp0(0xE1003000);
+        assert!(gpu.draw_mode.texture_x_flip);
+        assert!(gpu.draw_mode.texture_y_flip);
+    }
+
+    #[test]
+    fn test_texture_window() {
+        let mut gpu = GPU::new();
+
+        // Set texture window with mask and offset
+        // Mask: X=8, Y=4
+        // Offset: X=16, Y=8
+        let cmd = 0xE2000000 | 8 | (4 << 5) | (16 << 10) | (8 << 15);
+        gpu.write_gp0(cmd);
+
+        assert_eq!(gpu.texture_window.mask_x, 8);
+        assert_eq!(gpu.texture_window.mask_y, 4);
+        assert_eq!(gpu.texture_window.offset_x, 16);
+        assert_eq!(gpu.texture_window.offset_y, 8);
+    }
+
+    #[test]
+    fn test_draw_area_top_left() {
+        let mut gpu = GPU::new();
+
+        // Set top-left to (100, 200)
+        gpu.write_gp0(0xE3000064 | (200 << 10));
+
+        assert_eq!(gpu.draw_area.left, 100);
+        assert_eq!(gpu.draw_area.top, 200);
+    }
+
+    #[test]
+    fn test_draw_area_bottom_right() {
+        let mut gpu = GPU::new();
+
+        // Set bottom-right to (300, 400)
+        gpu.write_gp0(0xE400012C | (400 << 10));
+
+        assert_eq!(gpu.draw_area.right, 300);
+        assert_eq!(gpu.draw_area.bottom, 400);
+    }
+
+    #[test]
+    fn test_draw_area_coordinate_masking() {
+        let mut gpu = GPU::new();
+
+        // Test that coordinates are masked to valid ranges
+        // X: 10-bit (0-1023), Y: 9-bit (0-511)
+        // Note: GP0(E3h) doesn't mask coordinates - it extracts them directly
+        // The masking happens during rendering, not during command processing
+        gpu.write_gp0(0xE30007FF | (0x3FF << 10)); // X=1023, Y=1023
+
+        assert_eq!(gpu.draw_area.left, 1023);
+        assert_eq!(gpu.draw_area.top, 1023 & 0x1FF); // Y is masked to 9-bit = 511
+    }
+
+    #[test]
+    fn test_draw_offset_positive() {
+        let mut gpu = GPU::new();
+
+        // Set offset to (100, 200)
+        gpu.write_gp0(0xE5000064 | (200 << 11));
+
+        assert_eq!(gpu.draw_offset.0, 100);
+        assert_eq!(gpu.draw_offset.1, 200);
+    }
+
+    #[test]
+    fn test_draw_offset_negative() {
+        let mut gpu = GPU::new();
+
+        // Test negative offset with sign extension
+        // -100 in 11-bit signed: 0x79C (2's complement)
+        // -200 in 11-bit signed: 0x738
+        let neg_100 = ((-100i16) as u16 as u32) & 0x7FF;
+        let neg_200 = ((-200i16) as u16 as u32) & 0x7FF;
+        gpu.write_gp0(0xE5000000 | neg_100 | (neg_200 << 11));
+
+        assert_eq!(gpu.draw_offset.0, -100);
+        assert_eq!(gpu.draw_offset.1, -200);
+    }
+
+    #[test]
+    fn test_draw_offset_sign_extension() {
+        let mut gpu = GPU::new();
+
+        // Test boundary values
+        // Max positive: +1023 (0x3FF)
+        gpu.write_gp0(0xE50003FF | (0x3FF << 11));
+        assert_eq!(gpu.draw_offset.0, 1023);
+        assert_eq!(gpu.draw_offset.1, 1023);
+
+        // Min negative: -1024 (0x400)
+        gpu.write_gp0(0xE5000400 | (0x400 << 11));
+        assert_eq!(gpu.draw_offset.0, -1024);
+        assert_eq!(gpu.draw_offset.1, -1024);
+
+        // -1 (0x7FF)
+        gpu.write_gp0(0xE50007FF | (0x7FF << 11));
+        assert_eq!(gpu.draw_offset.0, -1);
+        assert_eq!(gpu.draw_offset.1, -1);
+    }
+
+    #[test]
+    fn test_mask_settings() {
+        let mut gpu = GPU::new();
+
+        // No mask
+        gpu.write_gp0(0xE6000000);
+        assert!(!gpu.status.set_mask_bit);
+        assert!(gpu.status.draw_pixels); // draw_pixels = !check_mask
+
+        // Set mask bit only
+        gpu.write_gp0(0xE6000001);
+        assert!(gpu.status.set_mask_bit);
+        assert!(gpu.status.draw_pixels);
+
+        // Check mask bit only
+        gpu.write_gp0(0xE6000002);
+        assert!(!gpu.status.set_mask_bit);
+        assert!(!gpu.status.draw_pixels); // draw_pixels = !check_mask
+
+        // Both set and check
+        gpu.write_gp0(0xE6000003);
+        assert!(gpu.status.set_mask_bit);
+        assert!(!gpu.status.draw_pixels);
+    }
+
+    #[test]
+    fn test_draw_mode_combined() {
+        let mut gpu = GPU::new();
+
+        // Set complex draw mode with multiple flags
+        // Page X=3 (192), Page Y=1 (256)
+        // Semi-trans=2 (subtractive)
+        // Depth=1 (8-bit)
+        // Dithering=on
+        // Draw to display=on
+        // Texture disable=off
+        let cmd = 0xE1000000
+            | 3 // Page X
+            | (1 << 4) // Page Y
+            | (2 << 5) // Semi-trans
+            | (1 << 7) // Depth
+            | (1 << 9) // Dithering
+            | (1 << 10); // Draw to display
+
+        gpu.write_gp0(cmd);
+
+        assert_eq!(gpu.draw_mode.texture_page_x_base, 192);
+        assert_eq!(gpu.draw_mode.texture_page_y_base, 256);
+        assert_eq!(gpu.draw_mode.semi_transparency, 2);
+        assert_eq!(gpu.draw_mode.texture_depth, 1);
+        assert!(gpu.draw_mode.dithering);
+        assert!(gpu.draw_mode.draw_to_display);
+        assert!(!gpu.draw_mode.texture_disable);
+    }
+}

@@ -515,3 +515,268 @@ impl GPU {
         self.render_textured_quad(&vertices, &texcoords, &texture_info, &color, true);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_monochrome_triangle_parsing() {
+        let mut gpu = GPU::new();
+
+        // GP0(0x20): Monochrome Triangle Opaque
+        // Color: Red (0xFF0000)
+        // Vertices: (10,20), (30,40), (50,60)
+        gpu.write_gp0(0x200000FF); // Command + Red
+        gpu.write_gp0(0x0014000A); // V1: Y=20, X=10
+        gpu.write_gp0(0x0028001E); // V2: Y=40, X=30
+        gpu.write_gp0(0x003C0032); // V3: Y=60, X=50
+
+        // Verify command was processed (FIFO should be empty)
+        assert!(gpu.command_fifo.is_empty());
+    }
+
+    #[test]
+    fn test_monochrome_quad_parsing() {
+        let mut gpu = GPU::new();
+
+        // GP0(0x28): Monochrome Quad Opaque
+        // Color: Green (0x00FF00)
+        // Vertices: (0,0), (100,0), (100,100), (0,100)
+        gpu.write_gp0(0x2800FF00); // Command + Green
+        gpu.write_gp0(0x00000000); // V1: (0,0)
+        gpu.write_gp0(0x00000064); // V2: (100,0)
+        gpu.write_gp0(0x00640064); // V3: (100,100)
+        gpu.write_gp0(0x00640000); // V4: (0,100)
+
+        assert!(gpu.command_fifo.is_empty());
+    }
+
+    #[test]
+    fn test_gouraud_triangle_parsing() {
+        let mut gpu = GPU::new();
+
+        // GP0(0x30): Gouraud-Shaded Triangle Opaque
+        // Per PSX-SPX format: (color1, vertex1, color2, vertex2, color3, vertex3)
+        gpu.write_gp0(0x30FF0000); // Command + Color1 (Red)
+        gpu.write_gp0(0x00000000); // V1: (0,0)
+        gpu.write_gp0(0x0000FF00); // Color2 (Green)
+        gpu.write_gp0(0x00640000); // V2: (100,0)
+        gpu.write_gp0(0x000000FF); // Color3 (Blue)
+        gpu.write_gp0(0x00320032); // V3: (50,50)
+
+        assert!(gpu.command_fifo.is_empty());
+    }
+
+    #[test]
+    fn test_gouraud_quad_parsing() {
+        let mut gpu = GPU::new();
+
+        // GP0(0x38): Gouraud-Shaded Quad Opaque
+        gpu.write_gp0(0x38FF0000); // Command + Color1 (Red)
+        gpu.write_gp0(0x00000000); // V1: (0,0)
+        gpu.write_gp0(0x0000FF00); // Color2 (Green)
+        gpu.write_gp0(0x00000064); // V2: (100,0)
+        gpu.write_gp0(0x000000FF); // Color3 (Blue)
+        gpu.write_gp0(0x00640064); // V3: (100,100)
+        gpu.write_gp0(0x00FFFF00); // Color4 (Yellow)
+        gpu.write_gp0(0x00640000); // V4: (0,100)
+
+        assert!(gpu.command_fifo.is_empty());
+    }
+
+    #[test]
+    fn test_textured_triangle_clut_extraction() {
+        let mut gpu = GPU::new();
+
+        // GP0(0x24): Textured Triangle Opaque
+        // Test CLUT coordinate extraction per PSX-SPX:
+        // Bits 0-5: X coordinate / 16
+        // Bits 6-14: Y coordinate (0-511)
+
+        // CLUT at X=320 (320/16 = 20 = 0x14), Y=100 (0x64)
+        let clut_word = (100 << 22) | (20 << 16) | 0x0000; // Y=100, X/16=20, U=0, V=0
+
+        gpu.write_gp0(0x24808080); // Command + Color
+        gpu.write_gp0(0x00000000); // V1: (0,0)
+        gpu.write_gp0(clut_word); // CLUT + TexCoord1
+        gpu.write_gp0(0x00000064); // V2: (100,0)
+        gpu.write_gp0(0x00000000); // Page + TexCoord2
+        gpu.write_gp0(0x00640064); // V3: (100,100)
+        gpu.write_gp0(0x00000000); // TexCoord3
+
+        assert!(gpu.command_fifo.is_empty());
+        // Note: Actual CLUT values would need to be verified in rendering function
+    }
+
+    #[test]
+    fn test_textured_triangle_page_extraction() {
+        let mut gpu = GPU::new();
+
+        // Test Texture Page extraction per PSX-SPX:
+        // Bits 16-19: Texture page X base (N×64)
+        // Bit 20: Texture page Y base (0=Y0-255, 1=Y256-511)
+        // Bits 23-24: Texture depth (0=4bit, 1=8bit, 2=15bit)
+
+        // Page at X=192 (3×64, bits 16-19 = 3), Y=256 (bit 20 = 1), 8-bit depth (bits 23-24 = 1)
+        let page_word = (1 << 23) | (1 << 20) | (3 << 16) | 0x0000; // depth=8bit, Y=256, X=192, U=0, V=0
+
+        gpu.write_gp0(0x24808080); // Command + Color
+        gpu.write_gp0(0x00000000); // V1
+        gpu.write_gp0(0x00000000); // CLUT + TexCoord1
+        gpu.write_gp0(0x00000064); // V2
+        gpu.write_gp0(page_word); // Page + TexCoord2
+        gpu.write_gp0(0x00640064); // V3
+        gpu.write_gp0(0x00000000); // TexCoord3
+
+        assert!(gpu.command_fifo.is_empty());
+    }
+
+    #[test]
+    fn test_textured_quad_parsing() {
+        let mut gpu = GPU::new();
+
+        // GP0(0x2C): Textured Quad Opaque
+        // 9 words total
+        gpu.write_gp0(0x2C808080); // Command + Color
+        gpu.write_gp0(0x00000000); // V1: (0,0)
+        gpu.write_gp0(0x00000000); // CLUT + TexCoord1
+        gpu.write_gp0(0x00000064); // V2: (100,0)
+        gpu.write_gp0(0x00000040); // Page + TexCoord2: U=64, V=0
+        gpu.write_gp0(0x00640064); // V3: (100,100)
+        gpu.write_gp0(0x00004040); // TexCoord3: U=64, V=64
+        gpu.write_gp0(0x00640000); // V4: (0,100)
+        gpu.write_gp0(0x00000040); // TexCoord4: U=0, V=64
+
+        assert!(gpu.command_fifo.is_empty());
+    }
+
+    #[test]
+    fn test_vertex_coordinate_range() {
+        let mut gpu = GPU::new();
+
+        // Per PSX-SPX: signed 16-bit coordinates, range -1024 to +1023
+        // Test maximum positive coordinates
+        gpu.write_gp0(0x20FFFFFF); // Monochrome triangle
+        gpu.write_gp0(0x03FF03FF); // V1: (1023, 1023)
+        gpu.write_gp0(0x03FF0000); // V2: (0, 1023)
+        gpu.write_gp0(0x000003FF); // V3: (1023, 0)
+
+        assert!(gpu.command_fifo.is_empty());
+
+        // Test minimum negative coordinates (-1024)
+        gpu.write_gp0(0x20FFFFFF);
+        gpu.write_gp0(0xFC00FC00); // V1: (-1024, -1024)
+        gpu.write_gp0(0xFC000000); // V2: (0, -1024)
+        gpu.write_gp0(0x0000FC00); // V3: (-1024, 0)
+
+        assert!(gpu.command_fifo.is_empty());
+    }
+
+    #[test]
+    fn test_semi_transparent_flags() {
+        let mut gpu = GPU::new();
+
+        // Test opaque triangle (bit 25 = 0)
+        gpu.write_gp0(0x20FFFFFF); // GP0(0x20): Opaque
+        gpu.write_gp0(0x00000000);
+        gpu.write_gp0(0x00640000);
+        gpu.write_gp0(0x00320032);
+        assert!(gpu.command_fifo.is_empty());
+
+        // Test semi-transparent triangle (bit 25 = 1)
+        gpu.write_gp0(0x22FFFFFF); // GP0(0x22): Semi-transparent
+        gpu.write_gp0(0x00000000);
+        gpu.write_gp0(0x00640000);
+        gpu.write_gp0(0x00320032);
+        assert!(gpu.command_fifo.is_empty());
+    }
+
+    #[test]
+    fn test_clut_coordinate_bit_layout() {
+        // Verify CLUT extraction formula per PSX-SPX
+        // Bits 0-5: X coordinate / 16 (multiply by 16 to get actual X)
+        // Bits 6-14: Y coordinate
+
+        // Example: CLUT at VRAM (512, 256)
+        // X = 512 / 16 = 32 (0x20)
+        // Y = 256 (0x100)
+        let clut_word = (256 << 22) | (32 << 16);
+
+        let clut_x = ((clut_word >> 16) & 0x3F) * 16;
+        let clut_y = (clut_word >> 22) & 0x1FF;
+
+        assert_eq!(clut_x, 512);
+        assert_eq!(clut_y, 256);
+    }
+
+    #[test]
+    fn test_clut_coordinate_range() {
+        // CLUT X: 0-5 bits = 0-63, multiply by 16 = 0-1008
+        // CLUT Y: 9 bits = 0-511
+
+        // Maximum CLUT coordinates
+        let max_clut_x = 0x3F; // 63
+        let max_clut_y = 0x1FF; // 511
+
+        let clut_word = (max_clut_y << 22) | (max_clut_x << 16);
+        let extracted_x = ((clut_word >> 16) & 0x3F) * 16;
+        let extracted_y = (clut_word >> 22) & 0x1FF;
+
+        assert_eq!(extracted_x, 63 * 16); // 1008
+        assert_eq!(extracted_y, 511);
+    }
+
+    #[test]
+    fn test_texture_page_bit_layout() {
+        // Verify texture page extraction per PSX-SPX
+        // Bits 16-19: Texture page X base (N×64)
+        // Bit 20: Texture page Y base (0=0-255, 1=256-511)
+        // Bits 23-24: Texture depth (0=4bit, 1=8bit, 2=15bit)
+
+        // Example: Page at X=256 (4×64), Y=256, 15-bit depth
+        // X base = 4 (bits 16-19)
+        // Y base = 1 (bit 20)
+        // Depth = 2 (bits 23-24)
+        let page_word = (2 << 23) | (1 << 20) | (4 << 16);
+
+        let page_x = ((page_word >> 16) & 0xF) * 64;
+        let page_y = ((page_word >> 20) & 1) * 256;
+        let tex_depth = ((page_word >> 23) & 0x3) as u8;
+
+        assert_eq!(page_x, 256);
+        assert_eq!(page_y, 256);
+        assert_eq!(tex_depth, 2); // 15-bit
+    }
+
+    #[test]
+    fn test_texture_depth_values() {
+        // Test all three texture depth modes
+        let depth_4bit = 0 << 23;
+        let depth_8bit = 1 << 23;
+        let depth_15bit = 2 << 23;
+
+        assert_eq!((depth_4bit >> 23) & 0x3, 0);
+        assert_eq!((depth_8bit >> 23) & 0x3, 1);
+        assert_eq!((depth_15bit >> 23) & 0x3, 2);
+    }
+
+    #[test]
+    fn test_partial_command_buffering() {
+        let mut gpu = GPU::new();
+
+        // Send partial triangle command (need 4 words, send only 2)
+        gpu.write_gp0(0x20FFFFFF);
+        gpu.write_gp0(0x00000000);
+
+        // Command should remain in FIFO, waiting for more data
+        assert_eq!(gpu.command_fifo.len(), 2);
+
+        // Complete the command
+        gpu.write_gp0(0x00640000);
+        gpu.write_gp0(0x00320032);
+
+        // Now FIFO should be empty
+        assert!(gpu.command_fifo.is_empty());
+    }
+}

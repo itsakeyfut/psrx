@@ -541,6 +541,342 @@ impl BlendMode {
     }
 }
 
+#[cfg(test)]
+mod blend_mode_tests {
+    use super::*;
+
+    #[test]
+    fn test_blend_mode_from_bits() {
+        assert_eq!(BlendMode::from_bits(0), BlendMode::Average);
+        assert_eq!(BlendMode::from_bits(1), BlendMode::Additive);
+        assert_eq!(BlendMode::from_bits(2), BlendMode::Subtractive);
+        assert_eq!(BlendMode::from_bits(3), BlendMode::AddQuarter);
+
+        // Test that only lower 2 bits are used
+        assert_eq!(BlendMode::from_bits(4), BlendMode::Average);
+        assert_eq!(BlendMode::from_bits(0xFF), BlendMode::AddQuarter);
+    }
+
+    #[test]
+    fn test_blend_mode_average() {
+        let mode = BlendMode::Average;
+
+        // White background + black foreground = gray
+        let result = mode.blend(0x7FFF, 0x0000);
+        assert_eq!(result, 0x3DEF); // (31,31,31)/2 = (15,15,15)
+
+        // Black background + white foreground = gray
+        let result = mode.blend(0x0000, 0x7FFF);
+        assert_eq!(result, 0x3DEF); // (31,31,31)/2 = (15,15,15)
+
+        // Red + blue = purple
+        let result = mode.blend(0x001F, 0x7C00); // Red + Blue
+        let (r, g, b) = BlendMode::unpack_rgb15(result);
+        assert_eq!(r, 15); // 31/2 = 15
+        assert_eq!(g, 0); // 0/2 = 0
+        assert_eq!(b, 15); // 31/2 = 15
+    }
+
+    #[test]
+    fn test_blend_mode_additive() {
+        let mode = BlendMode::Additive;
+
+        // White + white = white (clamped)
+        let result = mode.blend(0x7FFF, 0x7FFF);
+        assert_eq!(result, 0x7FFF);
+
+        // Half intensity + half intensity = (30,30,30)
+        let half = 0x3DEF; // (15,15,15)
+        let result = mode.blend(half, half);
+        let (r, g, b) = BlendMode::unpack_rgb15(result);
+        assert_eq!(r, 30); // 15 + 15 = 30
+        assert_eq!(g, 30);
+        assert_eq!(b, 30);
+
+        // Red + blue = magenta
+        let result = mode.blend(0x001F, 0x7C00);
+        let (r, g, b) = BlendMode::unpack_rgb15(result);
+        assert_eq!(r, 31);
+        assert_eq!(g, 0);
+        assert_eq!(b, 31);
+    }
+
+    #[test]
+    fn test_blend_mode_subtractive() {
+        let mode = BlendMode::Subtractive;
+
+        // White - black = white
+        let result = mode.blend(0x7FFF, 0x0000);
+        assert_eq!(result, 0x7FFF);
+
+        // Black - white = black (clamped)
+        let result = mode.blend(0x0000, 0x7FFF);
+        assert_eq!(result, 0x0000);
+
+        // White - red = cyan
+        let result = mode.blend(0x7FFF, 0x001F);
+        let (r, g, b) = BlendMode::unpack_rgb15(result);
+        assert_eq!(r, 0); // 31 - 31 = 0
+        assert_eq!(g, 31); // 31 - 0 = 31
+        assert_eq!(b, 31); // 31 - 0 = 31
+    }
+
+    #[test]
+    fn test_blend_mode_add_quarter() {
+        let mode = BlendMode::AddQuarter;
+
+        // White + white/4 = white (clamped)
+        let result = mode.blend(0x7FFF, 0x7FFF);
+        assert_eq!(result, 0x7FFF); // 31 + 31/4 = 31 + 7 = 38 → clamped to 31
+
+        // Black + white/4 = dark gray
+        let result = mode.blend(0x0000, 0x7FFF);
+        let (r, g, b) = BlendMode::unpack_rgb15(result);
+        assert_eq!(r, 7); // 0 + 31/4 = 7
+        assert_eq!(g, 7);
+        assert_eq!(b, 7);
+
+        // Half + quarter = three-quarters (approx)
+        let half = 0x3DEF; // (15,15,15)
+        let result = mode.blend(half, 0x7FFF);
+        let (r, g, b) = BlendMode::unpack_rgb15(result);
+        assert_eq!(r, 22); // 15 + 31/4 = 15 + 7 = 22
+        assert_eq!(g, 22);
+        assert_eq!(b, 22);
+    }
+}
+
+#[cfg(test)]
+mod color_tests {
+    use super::*;
+
+    #[test]
+    fn test_color_from_u32() {
+        // Test basic RGB extraction
+        let color = Color::from_u32(0x00FF8040);
+        assert_eq!(color.r, 0x40);
+        assert_eq!(color.g, 0x80);
+        assert_eq!(color.b, 0xFF);
+
+        // Test that upper bits are ignored
+        let color = Color::from_u32(0xFFFFFFFF);
+        assert_eq!(color.r, 0xFF);
+        assert_eq!(color.g, 0xFF);
+        assert_eq!(color.b, 0xFF);
+
+        // Test zero
+        let color = Color::from_u32(0x00000000);
+        assert_eq!(color.r, 0);
+        assert_eq!(color.g, 0);
+        assert_eq!(color.b, 0);
+    }
+
+    #[test]
+    fn test_color_to_rgb15() {
+        // White (255,255,255) → (31,31,31)
+        let color = Color {
+            r: 255,
+            g: 255,
+            b: 255,
+        };
+        assert_eq!(color.to_rgb15(), 0x7FFF);
+
+        // Black (0,0,0) → (0,0,0)
+        let color = Color { r: 0, g: 0, b: 0 };
+        assert_eq!(color.to_rgb15(), 0x0000);
+
+        // Red (255,0,0) → (31,0,0)
+        let color = Color { r: 255, g: 0, b: 0 };
+        assert_eq!(color.to_rgb15(), 0x001F);
+
+        // Green (0,255,0) → (0,31,0)
+        let color = Color { r: 0, g: 255, b: 0 };
+        assert_eq!(color.to_rgb15(), 0x03E0);
+
+        // Blue (0,0,255) → (0,0,31)
+        let color = Color { r: 0, g: 0, b: 255 };
+        assert_eq!(color.to_rgb15(), 0x7C00);
+
+        // Test truncation: 248 >> 3 = 31
+        let color = Color {
+            r: 248,
+            g: 248,
+            b: 248,
+        };
+        assert_eq!(color.to_rgb15(), 0x7FFF);
+
+        // Test truncation: 7 >> 3 = 0
+        let color = Color { r: 7, g: 7, b: 7 };
+        assert_eq!(color.to_rgb15(), 0x0000);
+
+        // Test mid-range: 128 >> 3 = 16
+        let color = Color {
+            r: 128,
+            g: 128,
+            b: 128,
+        };
+        let rgb15 = color.to_rgb15();
+        assert_eq!(rgb15 & 0x1F, 16); // Red
+        assert_eq!((rgb15 >> 5) & 0x1F, 16); // Green
+        assert_eq!((rgb15 >> 10) & 0x1F, 16); // Blue
+    }
+
+    #[test]
+    fn test_color_round_trip_precision_loss() {
+        // Test that converting 24-bit → 15-bit loses precision
+        let original = Color {
+            r: 100,
+            g: 150,
+            b: 200,
+        };
+        let rgb15 = original.to_rgb15();
+
+        // Extract back to verify precision loss
+        let r5 = (rgb15 & 0x1F) as u8;
+        let g5 = ((rgb15 >> 5) & 0x1F) as u8;
+        let b5 = ((rgb15 >> 10) & 0x1F) as u8;
+
+        assert_eq!(r5, 100 >> 3); // 12
+        assert_eq!(g5, 150 >> 3); // 18
+        assert_eq!(b5, 200 >> 3); // 25
+
+        // Verify we can't reconstruct the original 8-bit values by left-shifting
+        // because lower 3 bits are lost
+        // When we left-shift 5-bit values, we get: 12<<3=96, 18<<3=144, 25<<3=200
+        // Original values: 100, 150, 200
+        assert_ne!(r5 << 3, 100); // 96 ≠ 100
+        assert_ne!(g5 << 3, 150); // 144 ≠ 150
+        // Note: b5<<3 == 200 by coincidence (200>>3<<3 = 25<<3 = 200)
+    }
+}
+
+#[cfg(test)]
+mod vertex_tests {
+    use super::*;
+
+    #[test]
+    fn test_vertex_from_u32() {
+        // Test basic coordinate extraction
+        let v = Vertex::from_u32(0x00640032);
+        assert_eq!(v.x, 50); // 0x0032
+        assert_eq!(v.y, 100); // 0x0064
+
+        // Test zero coordinates
+        let v = Vertex::from_u32(0x00000000);
+        assert_eq!(v.x, 0);
+        assert_eq!(v.y, 0);
+
+        // Test maximum positive coordinates (per PSX-SPX: -1024 to +1023)
+        let v = Vertex::from_u32(0x03FF03FF); // 1023, 1023
+        assert_eq!(v.x, 1023);
+        assert_eq!(v.y, 1023);
+    }
+
+    #[test]
+    fn test_vertex_negative_coordinates() {
+        // Test negative coordinates (sign extension)
+        let v = Vertex::from_u32(0xFFFFFFFF); // -1, -1
+        assert_eq!(v.x, -1);
+        assert_eq!(v.y, -1);
+
+        // Test mixed positive/negative
+        let v = Vertex::from_u32(0xFFFF0064); // 100, -1
+        assert_eq!(v.x, 100);
+        assert_eq!(v.y, -1);
+
+        let v = Vertex::from_u32(0x0064FFFF); // -1, 100
+        assert_eq!(v.x, -1);
+        assert_eq!(v.y, 100);
+
+        // Test minimum coordinate (-1024)
+        let v = Vertex::from_u32(0xFC00FC00); // -1024, -1024
+        assert_eq!(v.x, -1024);
+        assert_eq!(v.y, -1024);
+    }
+
+    #[test]
+    fn test_vertex_coordinate_range() {
+        // Per PSX-SPX: "signed 16-bit X/Y coordinates (range -1024 to +1023)"
+        // Test boundary values
+
+        // Max X, max Y
+        let v = Vertex::from_u32(0x03FF03FF);
+        assert_eq!(v.x, 1023);
+        assert_eq!(v.y, 1023);
+
+        // Min X, min Y
+        let v = Vertex::from_u32(0xFC00FC00);
+        assert_eq!(v.x, -1024);
+        assert_eq!(v.y, -1024);
+
+        // Zero crossing
+        let v = Vertex::from_u32(0x00010001);
+        assert_eq!(v.x, 1);
+        assert_eq!(v.y, 1);
+
+        let v = Vertex::from_u32(0xFFFFFFFF);
+        assert_eq!(v.x, -1);
+        assert_eq!(v.y, -1);
+    }
+}
+
+#[cfg(test)]
+mod texcoord_tests {
+    use super::*;
+
+    #[test]
+    fn test_texcoord_from_u32() {
+        // Test basic UV extraction
+        let tc = TexCoord::from_u32(0x00804020);
+        assert_eq!(tc.u, 0x20);
+        assert_eq!(tc.v, 0x40);
+
+        // Test zero coordinates
+        let tc = TexCoord::from_u32(0x00000000);
+        assert_eq!(tc.u, 0);
+        assert_eq!(tc.v, 0);
+
+        // Test maximum coordinates (255)
+        let tc = TexCoord::from_u32(0x0000FFFF);
+        assert_eq!(tc.u, 0xFF);
+        assert_eq!(tc.v, 0xFF);
+
+        // Test that upper bits are ignored
+        let tc = TexCoord::from_u32(0xFFFF8040);
+        assert_eq!(tc.u, 0x40);
+        assert_eq!(tc.v, 0x80);
+    }
+
+    #[test]
+    fn test_texcoord_range() {
+        // Texture coordinates are 8-bit (0-255)
+        for u in [0u8, 1, 127, 128, 254, 255] {
+            for v in [0u8, 1, 127, 128, 254, 255] {
+                let word = (v as u32) << 8 | (u as u32);
+                let tc = TexCoord::from_u32(word);
+                assert_eq!(tc.u, u);
+                assert_eq!(tc.v, v);
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod texture_depth_tests {
+    use super::*;
+
+    #[test]
+    fn test_texture_depth_from_u8() {
+        assert_eq!(TextureDepth::from(0), TextureDepth::T4Bit);
+        assert_eq!(TextureDepth::from(1), TextureDepth::T8Bit);
+        assert_eq!(TextureDepth::from(2), TextureDepth::T15Bit);
+        assert_eq!(TextureDepth::from(3), TextureDepth::T15Bit); // 3 maps to 15-bit
+
+        // Test that larger values default to 15-bit
+        assert_eq!(TextureDepth::from(0xFF), TextureDepth::T15Bit);
+    }
+}
+
 /// GPU rendering command
 ///
 /// Represents a fully parsed GPU drawing command ready for execution.
