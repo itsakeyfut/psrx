@@ -91,7 +91,7 @@ fn keycode_to_string(key: KeyCode) -> String {
 }
 
 /// Convert string representation back to KeyCode
-fn string_to_keycode(s: &str) -> Option<KeyCode> {
+pub fn string_to_keycode(s: &str) -> Option<KeyCode> {
     // This is a bit hacky but works for now
     // We use the Debug format which matches the enum variant names
     match s {
@@ -156,10 +156,10 @@ fn button_name(button: u16) -> &'static str {
 /// Supports customizable key bindings and configuration persistence.
 pub struct InputHandler {
     /// Keyboard to button mapping (KeyCode -> PSX button bit)
-    key_mapping: HashMap<KeyCode, u16>,
+    pub key_mapping: HashMap<KeyCode, u16>,
 
     /// Configuration path
-    config_path: String,
+    pub config_path: String,
 }
 
 impl InputHandler {
