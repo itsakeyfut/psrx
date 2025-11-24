@@ -147,11 +147,7 @@ mod tests {
             Vertex { x: 200, y: 100 },
             Vertex { x: 150, y: 200 },
         ];
-        let color = Color {
-            r: 255,
-            g: 0,
-            b: 0,
-        };
+        let color = Color { r: 255, g: 0, b: 0 };
 
         gpu.render_monochrome_triangle(&vertices, &color, false);
 
@@ -177,11 +173,7 @@ mod tests {
             Vertex { x: 200, y: 100 },
             Vertex { x: 150, y: 200 },
         ];
-        let color = Color {
-            r: 0,
-            g: 255,
-            b: 0,
-        };
+        let color = Color { r: 0, g: 255, b: 0 };
 
         gpu.render_monochrome_triangle(&vertices, &color, false);
 
@@ -407,11 +399,7 @@ mod tests {
             Vertex { x: 200, y: 100 },
             Vertex { x: 300, y: 100 }, // All on same horizontal line
         ];
-        let color = Color {
-            r: 255,
-            g: 0,
-            b: 0,
-        };
+        let color = Color { r: 255, g: 0, b: 0 };
 
         // Should not crash, may or may not render
         gpu.render_monochrome_triangle(&vertices, &color, false);
@@ -427,11 +415,7 @@ mod tests {
             Vertex { x: 150, y: 150 },
             Vertex { x: 150, y: 150 },
         ];
-        let color = Color {
-            r: 0,
-            g: 255,
-            b: 0,
-        };
+        let color = Color { r: 0, g: 255, b: 0 };
 
         // Should not crash
         gpu.render_monochrome_triangle(&vertices, &color, false);
@@ -474,11 +458,7 @@ mod tests {
             Vertex { x: 1023, y: 0 },
             Vertex { x: 0, y: 511 },
         ];
-        let color = Color {
-            r: 0,
-            g: 0,
-            b: 255,
-        };
+        let color = Color { r: 0, g: 0, b: 255 };
 
         gpu.render_monochrome_triangle(&vertices, &color, false);
 
@@ -614,19 +594,11 @@ mod tests {
         ];
 
         // First triangle: red
-        let color1 = Color {
-            r: 255,
-            g: 0,
-            b: 0,
-        };
+        let color1 = Color { r: 255, g: 0, b: 0 };
         gpu.render_monochrome_triangle(&vertices, &color1, false);
 
         // Second triangle: green (overwrites)
-        let color2 = Color {
-            r: 0,
-            g: 255,
-            b: 0,
-        };
+        let color2 = Color { r: 0, g: 255, b: 0 };
         gpu.render_monochrome_triangle(&vertices, &color2, false);
 
         // Center should be green (latest draw)

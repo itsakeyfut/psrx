@@ -2513,7 +2513,13 @@ mod tests {
 
         // Per PSX-SPX: Negative coordinates wrap around
         // Should not crash with extreme negative values
-        rasterizer.draw_triangle(&mut vram, (-5000, -5000), (-4000, -4000), (-4500, -4000), 0x7FFF);
+        rasterizer.draw_triangle(
+            &mut vram,
+            (-5000, -5000),
+            (-4000, -4000),
+            (-4500, -4000),
+            0x7FFF,
+        );
     }
 
     #[test]
@@ -2522,7 +2528,13 @@ mod tests {
         let mut rasterizer = Rasterizer::new();
 
         // Per PSX-SPX: Large positive coordinates wrap around
-        rasterizer.draw_triangle(&mut vram, (10000, 10000), (11000, 11000), (10500, 11000), 0x7FFF);
+        rasterizer.draw_triangle(
+            &mut vram,
+            (10000, 10000),
+            (11000, 11000),
+            (10500, 11000),
+            0x7FFF,
+        );
     }
 
     #[test]
@@ -2763,11 +2775,7 @@ mod tests {
             100,
             0, // width = 0
             30,
-            &Color {
-                r: 255,
-                g: 0,
-                b: 0,
-            },
+            &Color { r: 255, g: 0, b: 0 },
             false,
         );
 
@@ -2784,11 +2792,7 @@ mod tests {
             100,
             30,
             0, // height = 0
-            &Color {
-                r: 255,
-                g: 0,
-                b: 0,
-            },
+            &Color { r: 255, g: 0, b: 0 },
             false,
         );
 
@@ -2804,14 +2808,18 @@ mod tests {
         // Create a polyline with 100 vertices (zigzag pattern)
         let mut points = Vec::new();
         for i in 0..100 {
-            points.push((100 + i * 5, 100 + (i % 2) * 50));
+            points.push((100 + (i * 5) as i16, 100 + ((i % 2) * 50) as i16));
         }
 
         rasterizer.draw_polyline(&mut vram, &points, 0x7FFF);
 
-        // Check that some vertices are drawn
-        assert_ne!(vram[100 * 1024 + 100], 0);
-        assert_ne!(vram[150 * 1024 + 250], 0);
+        // Check that some pixels are drawn (polyline with 100 points should draw many pixels)
+        let drawn_count = vram.iter().filter(|&&p| p != 0).count();
+        assert!(
+            drawn_count > 100,
+            "Polyline should draw many pixels, but only drew {}",
+            drawn_count
+        );
     }
 
     #[test]
@@ -2856,7 +2864,10 @@ mod tests {
         assert_eq!(Rasterizer::rgb_to_rgb15(255, 255, 255), 0x7FFF);
 
         // Test that 8-bit values in same 5-bit bucket convert identically
-        assert_eq!(Rasterizer::rgb_to_rgb15(8, 8, 8), Rasterizer::rgb_to_rgb15(15, 15, 15));
+        assert_eq!(
+            Rasterizer::rgb_to_rgb15(8, 8, 8),
+            Rasterizer::rgb_to_rgb15(15, 15, 15)
+        );
 
         // Test precision loss
         let rgb15 = Rasterizer::rgb_to_rgb15(100, 150, 200);

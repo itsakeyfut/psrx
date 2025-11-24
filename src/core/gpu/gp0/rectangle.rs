@@ -1100,7 +1100,7 @@ mod tests {
         // CLUT at X=320 (320/16 = 20), Y=100
         let clut_x = 20u32; // X / 16
         let clut_y = 100u32;
-        let texcoord_clut = (clut_y << 22) | (clut_x << 16) | 0x0000;
+        let texcoord_clut = (clut_y << 22) | (clut_x << 16);
 
         gpu.write_gp0(0x64808080); // Command
         gpu.write_gp0(0x00000000); // Vertex

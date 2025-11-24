@@ -746,7 +746,7 @@ mod color_tests {
         // Original values: 100, 150, 200
         assert_ne!(r5 << 3, 100); // 96 ≠ 100
         assert_ne!(g5 << 3, 150); // 144 ≠ 150
-        // Note: b5<<3 == 200 by coincidence (200>>3<<3 = 25<<3 = 200)
+                                  // Note: b5<<3 == 200 by coincidence (200>>3<<3 = 25<<3 = 200)
     }
 }
 

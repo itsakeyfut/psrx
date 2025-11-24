@@ -595,7 +595,7 @@ mod tests {
         // Bits 6-14: Y coordinate (0-511)
 
         // CLUT at X=320 (320/16 = 20 = 0x14), Y=100 (0x64)
-        let clut_word = (100 << 22) | (20 << 16) | 0x0000; // Y=100, X/16=20, U=0, V=0
+        let clut_word = (100 << 22) | (20 << 16); // Y=100, X/16=20, U=0, V=0
 
         gpu.write_gp0(0x24808080); // Command + Color
         gpu.write_gp0(0x00000000); // V1: (0,0)
@@ -619,7 +619,7 @@ mod tests {
         // Bits 23-24: Texture depth (0=4bit, 1=8bit, 2=15bit)
 
         // Page at X=192 (3×64, bits 16-19 = 3), Y=256 (bit 20 = 1), 8-bit depth (bits 23-24 = 1)
-        let page_word = (1 << 23) | (1 << 20) | (3 << 16) | 0x0000; // depth=8bit, Y=256, X=192, U=0, V=0
+        let page_word = (1 << 23) | (1 << 20) | (3 << 16); // depth=8bit, Y=256, X=192, U=0, V=0
 
         gpu.write_gp0(0x24808080); // Command + Color
         gpu.write_gp0(0x00000000); // V1

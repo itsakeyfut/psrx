@@ -380,11 +380,17 @@ mod tests {
         // 0 = 15bit, 1 = 24bit
 
         gpu.gp1_display_mode(0b00000000); // 15bit
-        assert_eq!(gpu.display_mode.display_area_color_depth, ColorDepth::C15Bit);
+        assert_eq!(
+            gpu.display_mode.display_area_color_depth,
+            ColorDepth::C15Bit
+        );
         assert!(!gpu.status.display_area_color_depth);
 
         gpu.gp1_display_mode(0b00010000); // 24bit
-        assert_eq!(gpu.display_mode.display_area_color_depth, ColorDepth::C24Bit);
+        assert_eq!(
+            gpu.display_mode.display_area_color_depth,
+            ColorDepth::C24Bit
+        );
         assert!(gpu.status.display_area_color_depth);
     }
 
@@ -429,7 +435,10 @@ mod tests {
         assert_eq!(gpu.display_mode.horizontal_res, HorizontalRes::R320);
         assert_eq!(gpu.display_mode.vertical_res, VerticalRes::R240);
         assert_eq!(gpu.display_mode.video_mode, VideoMode::NTSC);
-        assert_eq!(gpu.display_mode.display_area_color_depth, ColorDepth::C15Bit);
+        assert_eq!(
+            gpu.display_mode.display_area_color_depth,
+            ColorDepth::C15Bit
+        );
         assert!(!gpu.display_mode.interlaced);
     }
 

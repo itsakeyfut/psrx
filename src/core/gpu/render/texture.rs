@@ -516,9 +516,9 @@ mod tests {
         // Per PSX-SPX: 8-bit textures use 256-color CLUT
         // Set up CLUT at (0, 1)
         for i in 0..256u16 {
-            let r = (i & 0x1F) as u16;
-            let g = ((i >> 3) & 0x1F) as u16;
-            let b = ((i >> 6) & 0x1F) as u16;
+            let r = i & 0x1F;
+            let g = (i >> 3) & 0x1F;
+            let b = (i >> 6) & 0x1F;
             let color = (b << 10) | (g << 5) | r;
             gpu.write_vram(i % 16, 1 + (i / 16), color);
         }

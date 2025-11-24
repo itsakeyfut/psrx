@@ -159,21 +159,9 @@ mod tests {
             Vertex { x: 150, y: 200 },
         ];
         let colors = [
-            Color {
-                r: 255,
-                g: 0,
-                b: 0,
-            }, // Red
-            Color {
-                r: 0,
-                g: 255,
-                b: 0,
-            }, // Green
-            Color {
-                r: 0,
-                g: 0,
-                b: 255,
-            }, // Blue
+            Color { r: 255, g: 0, b: 0 }, // Red
+            Color { r: 0, g: 255, b: 0 }, // Green
+            Color { r: 0, g: 0, b: 255 }, // Blue
         ];
 
         gpu.render_gradient_triangle(&vertices, &colors, false);
@@ -229,21 +217,9 @@ mod tests {
             Vertex { x: 150, y: 200 },
         ];
         let colors = [
-            Color {
-                r: 255,
-                g: 0,
-                b: 0,
-            },
-            Color {
-                r: 0,
-                g: 255,
-                b: 0,
-            },
-            Color {
-                r: 0,
-                g: 0,
-                b: 255,
-            },
+            Color { r: 255, g: 0, b: 0 },
+            Color { r: 0, g: 255, b: 0 },
+            Color { r: 0, g: 0, b: 255 },
         ];
 
         gpu.render_gradient_triangle(&vertices, &colors, false);
@@ -300,21 +276,9 @@ mod tests {
             Vertex { x: 150, y: 200 },
         ];
         let colors = [
-            Color {
-                r: 255,
-                g: 0,
-                b: 0,
-            }, // Red at v0
-            Color {
-                r: 255,
-                g: 0,
-                b: 0,
-            }, // Red at v1
-            Color {
-                r: 0,
-                g: 0,
-                b: 255,
-            }, // Blue at v2
+            Color { r: 255, g: 0, b: 0 }, // Red at v0
+            Color { r: 255, g: 0, b: 0 }, // Red at v1
+            Color { r: 0, g: 0, b: 255 }, // Blue at v2
         ];
 
         gpu.render_gradient_triangle(&vertices, &colors, false);
@@ -338,21 +302,9 @@ mod tests {
             Vertex { x: 25, y: 100 },
         ];
         let colors = [
-            Color {
-                r: 255,
-                g: 0,
-                b: 0,
-            },
-            Color {
-                r: 0,
-                g: 255,
-                b: 0,
-            },
-            Color {
-                r: 0,
-                g: 0,
-                b: 255,
-            },
+            Color { r: 255, g: 0, b: 0 },
+            Color { r: 0, g: 255, b: 0 },
+            Color { r: 0, g: 0, b: 255 },
         ];
 
         // Should handle wrapping
@@ -369,21 +321,9 @@ mod tests {
             Vertex { x: 512, y: 511 },
         ];
         let colors = [
-            Color {
-                r: 255,
-                g: 0,
-                b: 0,
-            },
-            Color {
-                r: 0,
-                g: 255,
-                b: 0,
-            },
-            Color {
-                r: 0,
-                g: 0,
-                b: 255,
-            },
+            Color { r: 255, g: 0, b: 0 },
+            Color { r: 0, g: 255, b: 0 },
+            Color { r: 0, g: 0, b: 255 },
         ];
 
         gpu.render_gradient_triangle(&vertices, &colors, false);
@@ -403,21 +343,9 @@ mod tests {
             Vertex { x: 300, y: 100 },
         ];
         let colors = [
-            Color {
-                r: 255,
-                g: 0,
-                b: 0,
-            },
-            Color {
-                r: 0,
-                g: 255,
-                b: 0,
-            },
-            Color {
-                r: 0,
-                g: 0,
-                b: 255,
-            },
+            Color { r: 255, g: 0, b: 0 },
+            Color { r: 0, g: 255, b: 0 },
+            Color { r: 0, g: 0, b: 255 },
         ];
 
         // Should not crash
@@ -436,21 +364,9 @@ mod tests {
             Vertex { x: 100, y: 200 },
         ];
         let colors = [
-            Color {
-                r: 255,
-                g: 0,
-                b: 0,
-            }, // Red
-            Color {
-                r: 0,
-                g: 255,
-                b: 0,
-            }, // Green
-            Color {
-                r: 0,
-                g: 0,
-                b: 255,
-            }, // Blue
+            Color { r: 255, g: 0, b: 0 }, // Red
+            Color { r: 0, g: 255, b: 0 }, // Green
+            Color { r: 0, g: 0, b: 255 }, // Blue
             Color {
                 r: 255,
                 g: 255,
@@ -477,21 +393,9 @@ mod tests {
             Vertex { x: 100, y: 200 },
         ];
         let colors = [
-            Color {
-                r: 255,
-                g: 0,
-                b: 0,
-            },
-            Color {
-                r: 0,
-                g: 255,
-                b: 0,
-            },
-            Color {
-                r: 0,
-                g: 0,
-                b: 255,
-            },
+            Color { r: 255, g: 0, b: 0 },
+            Color { r: 0, g: 255, b: 0 },
+            Color { r: 0, g: 0, b: 255 },
             Color {
                 r: 255,
                 g: 255,
@@ -519,21 +423,9 @@ mod tests {
             Vertex { x: 50, y: 150 },
         ];
         let colors = [
-            Color {
-                r: 255,
-                g: 0,
-                b: 0,
-            },
-            Color {
-                r: 0,
-                g: 255,
-                b: 0,
-            },
-            Color {
-                r: 0,
-                g: 0,
-                b: 255,
-            },
+            Color { r: 255, g: 0, b: 0 },
+            Color { r: 0, g: 255, b: 0 },
+            Color { r: 0, g: 0, b: 255 },
             Color {
                 r: 255,
                 g: 255,
@@ -628,21 +520,9 @@ mod tests {
             Vertex { x: 80, y: 180 },
         ];
         let colors = [
-            Color {
-                r: 255,
-                g: 0,
-                b: 0,
-            },
-            Color {
-                r: 0,
-                g: 255,
-                b: 0,
-            },
-            Color {
-                r: 0,
-                g: 0,
-                b: 255,
-            },
+            Color { r: 255, g: 0, b: 0 },
+            Color { r: 0, g: 255, b: 0 },
+            Color { r: 0, g: 0, b: 255 },
             Color {
                 r: 255,
                 g: 255,
@@ -667,11 +547,7 @@ mod tests {
         let colors = [
             Color { r: 0, g: 0, b: 0 },
             Color { r: 0, g: 0, b: 0 },
-            Color {
-                r: 255,
-                g: 0,
-                b: 0,
-            },
+            Color { r: 255, g: 0, b: 0 },
         ];
 
         gpu.render_gradient_triangle(&vertices, &colors, false);
@@ -694,21 +570,9 @@ mod tests {
             Vertex { x: 0, y: 511 },
         ];
         let colors = [
-            Color {
-                r: 255,
-                g: 0,
-                b: 0,
-            },
-            Color {
-                r: 0,
-                g: 255,
-                b: 0,
-            },
-            Color {
-                r: 0,
-                g: 0,
-                b: 255,
-            },
+            Color { r: 255, g: 0, b: 0 },
+            Color { r: 0, g: 255, b: 0 },
+            Color { r: 0, g: 0, b: 255 },
             Color {
                 r: 255,
                 g: 255,

@@ -424,10 +424,10 @@ mod tests {
     fn test_texture_window_masking_formula() {
         // Per PSX-SPX: Texcoord = (Texcoord AND (NOT (Mask*8))) OR ((Offset AND Mask)*8)
         let window = TextureWindow {
-            mask_x: 3,      // 3 * 8 = 24 pixel mask
-            mask_y: 7,      // 7 * 8 = 56 pixel mask
-            offset_x: 2,    // 2 * 8 = 16 pixel offset
-            offset_y: 4,    // 4 * 8 = 32 pixel offset
+            mask_x: 3,   // 3 * 8 = 24 pixel mask
+            mask_y: 7,   // 7 * 8 = 56 pixel mask
+            offset_x: 2, // 2 * 8 = 16 pixel offset
+            offset_y: 4, // 4 * 8 = 32 pixel offset
         };
 
         // Verify mask values are in valid range (0-31 = 5 bits)
@@ -594,7 +594,7 @@ mod tests {
     #[test]
     fn test_horizontal_res_values() {
         // Test that all horizontal resolution values are distinct
-        let resolutions = vec![
+        let resolutions = [
             HorizontalRes::R256,
             HorizontalRes::R320,
             HorizontalRes::R512,

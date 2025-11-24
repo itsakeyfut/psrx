@@ -271,11 +271,7 @@ mod tests {
         // Horizontal line
         let v0 = Vertex { x: 100, y: 150 };
         let v1 = Vertex { x: 200, y: 150 };
-        let color = Color {
-            r: 255,
-            g: 0,
-            b: 0,
-        };
+        let color = Color { r: 255, g: 0, b: 0 };
 
         gpu.render_line(v0, v1, color, false);
 
@@ -291,11 +287,7 @@ mod tests {
         // Vertical line
         let v0 = Vertex { x: 150, y: 100 };
         let v1 = Vertex { x: 150, y: 200 };
-        let color = Color {
-            r: 0,
-            g: 255,
-            b: 0,
-        };
+        let color = Color { r: 0, g: 255, b: 0 };
 
         gpu.render_line(v0, v1, color, false);
 
@@ -311,11 +303,7 @@ mod tests {
         // Diagonal line (45 degrees)
         let v0 = Vertex { x: 100, y: 100 };
         let v1 = Vertex { x: 200, y: 200 };
-        let color = Color {
-            r: 0,
-            g: 0,
-            b: 255,
-        };
+        let color = Color { r: 0, g: 0, b: 255 };
 
         gpu.render_line(v0, v1, color, false);
 
@@ -455,11 +443,7 @@ mod tests {
             Vertex { x: 150, y: 200 },
             Vertex { x: 100, y: 100 }, // Close the triangle
         ];
-        let color = Color {
-            r: 255,
-            g: 0,
-            b: 0,
-        };
+        let color = Color { r: 255, g: 0, b: 0 };
 
         gpu.render_polyline(&vertices, color, false);
 
@@ -547,17 +531,9 @@ mod tests {
 
         // Line from red to blue
         let v0 = Vertex { x: 100, y: 150 };
-        let c0 = Color {
-            r: 255,
-            g: 0,
-            b: 0,
-        };
+        let c0 = Color { r: 255, g: 0, b: 0 };
         let v1 = Vertex { x: 200, y: 150 };
-        let c1 = Color {
-            r: 0,
-            g: 0,
-            b: 255,
-        };
+        let c1 = Color { r: 0, g: 0, b: 255 };
 
         gpu.render_shaded_line(v0, c0, v1, c1, false);
 
@@ -574,11 +550,7 @@ mod tests {
 
         // Per PSX-SPX: Shaded lines use Gouraud interpolation
         let v0 = Vertex { x: 100, y: 100 };
-        let c0 = Color {
-            r: 0,
-            g: 0,
-            b: 0,
-        }; // Black
+        let c0 = Color { r: 0, g: 0, b: 0 }; // Black
         let v1 = Vertex { x: 200, y: 100 };
         let c1 = Color {
             r: 248,
@@ -602,17 +574,9 @@ mod tests {
         gpu.draw_offset = (50, 30);
 
         let v0 = Vertex { x: 100, y: 100 };
-        let c0 = Color {
-            r: 255,
-            g: 0,
-            b: 0,
-        };
+        let c0 = Color { r: 255, g: 0, b: 0 };
         let v1 = Vertex { x: 200, y: 100 };
-        let c1 = Color {
-            r: 0,
-            g: 255,
-            b: 0,
-        };
+        let c1 = Color { r: 0, g: 255, b: 0 };
 
         gpu.render_shaded_line(v0, c0, v1, c1, false);
 
@@ -632,21 +596,9 @@ mod tests {
             Vertex { x: 200, y: 200 },
         ];
         let colors = vec![
-            Color {
-                r: 255,
-                g: 0,
-                b: 0,
-            }, // Red
-            Color {
-                r: 0,
-                g: 255,
-                b: 0,
-            }, // Green
-            Color {
-                r: 0,
-                g: 0,
-                b: 255,
-            }, // Blue
+            Color { r: 255, g: 0, b: 0 }, // Red
+            Color { r: 0, g: 255, b: 0 }, // Green
+            Color { r: 0, g: 0, b: 255 }, // Blue
         ];
 
         gpu.render_shaded_polyline(&vertices, &colors, false);
@@ -681,11 +633,7 @@ mod tests {
             Vertex { x: 200, y: 100 },
             Vertex { x: 150, y: 200 },
         ];
-        let colors = vec![Color {
-            r: 255,
-            g: 0,
-            b: 0,
-        }];
+        let colors = vec![Color { r: 255, g: 0, b: 0 }];
 
         // Should not crash (implementation checks colors.len() < 2)
         gpu.render_shaded_polyline(&vertices, &colors, false);
@@ -728,11 +676,7 @@ mod tests {
         // Shallow line (more horizontal)
         let v0 = Vertex { x: 100, y: 150 };
         let v1 = Vertex { x: 200, y: 160 };
-        let color = Color {
-            r: 255,
-            g: 0,
-            b: 0,
-        };
+        let color = Color { r: 255, g: 0, b: 0 };
 
         gpu.render_line(v0, v1, color, false);
 

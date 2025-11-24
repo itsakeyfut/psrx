@@ -374,7 +374,7 @@ mod tests {
         // Setup a non-overlapping region first for simpler testing
         // Use a pattern: positions 50-57 will have values 1-8
         for x in 0..8 {
-            gpu.write_vram(50 + x, 50, (x + 1) as u16 * 100);
+            gpu.write_vram(50 + x, 50, (x + 1) * 100);
         }
 
         // Verify initial setup
