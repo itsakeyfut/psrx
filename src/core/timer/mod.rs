@@ -858,3 +858,696 @@ impl crate::core::memory::IODevice for Timers {
         "Timers"
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_timer_channel_default() {
+        let timer = TimerChannel::new(0);
+        assert_eq!(timer.read_counter(), 0);
+        assert_eq!(timer.read_target(), 0);
+        assert!(!timer.irq_pending());
+    }
+
+    #[test]
+    fn test_timer_channel_ids() {
+        for id in 0..3 {
+            let timer = TimerChannel::new(id);
+            assert_eq!(timer.channel_id, id);
+        }
+    }
+
+    #[test]
+    fn test_counter_read_write() {
+        let mut timer = TimerChannel::new(0);
+        timer.write_counter(0x1234);
+        assert_eq!(timer.read_counter(), 0x1234);
+
+        timer.write_counter(0xFFFF);
+        assert_eq!(timer.read_counter(), 0xFFFF);
+
+        timer.write_counter(0);
+        assert_eq!(timer.read_counter(), 0);
+    }
+
+    #[test]
+    fn test_target_read_write() {
+        let mut timer = TimerChannel::new(0);
+        timer.write_target(0x5678);
+        assert_eq!(timer.read_target(), 0x5678);
+
+        timer.write_target(0xFFFF);
+        assert_eq!(timer.read_target(), 0xFFFF);
+
+        timer.write_target(0);
+        assert_eq!(timer.read_target(), 0);
+    }
+
+    #[test]
+    fn test_mode_register_serialization() {
+        let mut timer = TimerChannel::new(0);
+
+        // Write mode with all fields set
+        let mode_value = 0x0001 // sync_enable
+            | (0x03 << 1)       // sync_mode = 3
+            | 0x0008            // reset_on_target
+            | 0x0010            // irq_on_target
+            | 0x0020            // irq_on_max
+            | 0x0040            // irq_repeat
+            | 0x0080            // irq_pulse_mode
+            | (0x03 << 8); // clock_source = 3
+
+        timer.write_mode(mode_value);
+
+        assert!(timer.mode.sync_enable);
+        assert_eq!(timer.mode.sync_mode, 3);
+        assert!(timer.mode.reset_on_target);
+        assert!(timer.mode.irq_on_target);
+        assert!(timer.mode.irq_on_max);
+        assert!(timer.mode.irq_repeat);
+        assert!(timer.mode.irq_pulse_mode);
+        assert_eq!(timer.mode.clock_source, 3);
+    }
+
+    #[test]
+    fn test_mode_register_deserialization() {
+        let mut timer = TimerChannel::new(0);
+
+        timer.mode.sync_enable = true;
+        timer.mode.sync_mode = 2;
+        timer.mode.reset_on_target = true;
+        timer.mode.irq_on_target = true;
+        timer.mode.irq_on_max = false;
+        timer.mode.irq_repeat = true;
+        timer.mode.irq_pulse_mode = false;
+        timer.mode.clock_source = 1;
+
+        let mode_value = timer.read_mode();
+
+        assert_eq!(mode_value & 0x0001, 0x0001); // sync_enable
+        assert_eq!((mode_value >> 1) & 0x03, 2); // sync_mode
+        assert_eq!(mode_value & 0x0008, 0x0008); // reset_on_target
+        assert_eq!(mode_value & 0x0010, 0x0010); // irq_on_target
+        assert_eq!(mode_value & 0x0020, 0); // irq_on_max
+        assert_eq!(mode_value & 0x0040, 0x0040); // irq_repeat
+        assert_eq!(mode_value & 0x0080, 0); // irq_pulse_mode
+        assert_eq!((mode_value >> 8) & 0x03, 1); // clock_source
+    }
+
+    #[test]
+    fn test_mode_write_resets_counter() {
+        let mut timer = TimerChannel::new(0);
+        timer.write_counter(0x1234);
+        assert_eq!(timer.read_counter(), 0x1234);
+
+        timer.write_mode(0x0000);
+        assert_eq!(
+            timer.read_counter(),
+            0,
+            "Writing mode should reset counter to 0"
+        );
+    }
+
+    #[test]
+    fn test_mode_write_clears_flags() {
+        let mut timer = TimerChannel::new(0);
+
+        // Manually set flags
+        timer.irq_flag = true;
+        timer.reached_target = true;
+        timer.reached_max = true;
+
+        timer.write_mode(0x0000);
+
+        assert!(!timer.irq_flag, "Mode write should clear IRQ flag");
+        assert!(
+            !timer.reached_target,
+            "Mode write should clear reached_target"
+        );
+        assert!(!timer.reached_max, "Mode write should clear reached_max");
+    }
+
+    #[test]
+    fn test_mode_read_clears_flags() {
+        let mut timer = TimerChannel::new(0);
+
+        // Set flags
+        timer.irq_flag = true;
+        timer.reached_target = true;
+        timer.reached_max = true;
+
+        let mode_value = timer.read_mode();
+
+        // Flags should be set in the returned value
+        assert_eq!(
+            mode_value & (1 << 10),
+            1 << 10,
+            "IRQ flag should be in read value"
+        );
+        assert_eq!(
+            mode_value & (1 << 11),
+            1 << 11,
+            "Target flag should be in read value"
+        );
+        assert_eq!(
+            mode_value & (1 << 12),
+            1 << 12,
+            "Max flag should be in read value"
+        );
+
+        // Flags should be cleared after read
+        assert!(!timer.irq_flag, "Reading mode should clear IRQ flag");
+        assert!(
+            !timer.reached_target,
+            "Reading mode should clear reached_target"
+        );
+        assert!(!timer.reached_max, "Reading mode should clear reached_max");
+    }
+
+    #[test]
+    fn test_tick_increments_counter() {
+        let mut timer = TimerChannel::new(0);
+        timer.write_mode(0x0000); // Free-run mode
+
+        timer.tick(1, false);
+        assert_eq!(timer.read_counter(), 1);
+
+        timer.tick(5, false);
+        assert_eq!(timer.read_counter(), 6);
+    }
+
+    #[test]
+    fn test_tick_target_reached() {
+        let mut timer = TimerChannel::new(0);
+        timer.write_target(10);
+        timer.write_mode(0x0010); // IRQ on target
+
+        timer.tick(10, false);
+
+        assert_eq!(timer.read_counter(), 10);
+        assert!(timer.reached_target, "Should set reached_target flag");
+        assert!(timer.irq_pending(), "Should trigger IRQ on target");
+    }
+
+    #[test]
+    fn test_tick_max_reached() {
+        let mut timer = TimerChannel::new(0);
+        timer.write_mode(0x0020); // IRQ on max
+        timer.write_counter(0xFFFE);
+
+        timer.tick(1, false);
+
+        assert_eq!(timer.read_counter(), 0xFFFF);
+        assert!(timer.reached_max, "Should set reached_max flag");
+        assert!(timer.irq_pending(), "Should trigger IRQ on max");
+    }
+
+    #[test]
+    fn test_reset_on_target() {
+        let mut timer = TimerChannel::new(0);
+        timer.write_target(10);
+        timer.write_mode(0x0008); // Reset on target
+
+        timer.tick(10, false);
+        assert_eq!(
+            timer.read_counter(),
+            0,
+            "Counter should reset to 0 when target reached"
+        );
+
+        timer.tick(5, false);
+        assert_eq!(timer.read_counter(), 5);
+    }
+
+    #[test]
+    fn test_counter_wrapping() {
+        let mut timer = TimerChannel::new(0);
+        timer.write_mode(0x0000); // Free-run, no reset on target
+        timer.write_counter(0xFFFF);
+
+        timer.tick(1, false);
+        // Counter wraps: 0xFFFF + 1 = 0, but doesn't trigger reached_max
+        // because the check happens after increment (0 != 0xFFFF)
+        assert_eq!(
+            timer.read_counter(),
+            0,
+            "Counter should wrap to 0 after 0xFFFF"
+        );
+    }
+
+    #[test]
+    fn test_irq_one_shot_mode() {
+        let mut timer = TimerChannel::new(0);
+        timer.write_target(10);
+        timer.write_mode(0x0010); // IRQ on target, one-shot (bit 6 = 0)
+
+        let irq1 = timer.tick(10, false);
+        assert!(irq1, "Should trigger IRQ on first target hit");
+        assert!(timer.irq_flag);
+
+        // In one-shot mode, irq_flag stays set
+        timer.write_counter(0);
+        let old_flag = timer.irq_flag;
+        timer.tick(10, false);
+
+        // IRQ flag should not change (one-shot means no repeat)
+        assert_eq!(
+            timer.irq_flag, old_flag,
+            "IRQ flag should remain set in one-shot mode"
+        );
+    }
+
+    #[test]
+    fn test_irq_repeat_mode() {
+        let mut timer = TimerChannel::new(0);
+        timer.write_target(10);
+        timer.write_mode(0x0050); // IRQ on target, repeat mode (bit 6 = 1)
+
+        let irq1 = timer.tick(10, false);
+        assert!(irq1, "Should trigger IRQ on first target hit");
+
+        // Reset counter and tick again
+        timer.write_counter(0);
+        let irq2 = timer.tick(10, false);
+        assert!(irq2, "Should trigger IRQ again in repeat mode");
+    }
+
+    #[test]
+    fn test_sync_mode_0_pause_during_blank() {
+        let mut timer = TimerChannel::new(0);
+        timer.write_mode(0x0001); // Sync enable, mode 0
+
+        // Count when sync_signal is false
+        timer.tick(5, false);
+        assert_eq!(timer.read_counter(), 5);
+
+        // Pause when sync_signal is true
+        timer.tick(5, true);
+        assert_eq!(timer.read_counter(), 5, "Should pause counting during sync");
+
+        // Resume when sync_signal is false again
+        timer.tick(3, false);
+        assert_eq!(timer.read_counter(), 8);
+    }
+
+    #[test]
+    fn test_sync_mode_1_free_run_reset_on_edge() {
+        let mut timer = TimerChannel::new(0);
+        timer.write_mode(0x0003); // Sync enable, mode 1
+
+        // Free-run counting
+        timer.tick(10, false);
+        assert_eq!(timer.read_counter(), 10);
+
+        timer.tick(5, false);
+        assert_eq!(timer.read_counter(), 15);
+
+        // Reset on rising edge (false -> true), then counter increments
+        timer.tick(1, true);
+        // Reset happens first (counter = 0), then 1 cycle runs (counter = 1)
+        assert_eq!(timer.read_counter(), 1, "Reset on edge, then increment");
+
+        // Continue counting (no edge, true -> true)
+        timer.tick(5, true);
+        assert_eq!(timer.read_counter(), 6);
+    }
+
+    #[test]
+    fn test_sync_mode_2_count_during_blank() {
+        let mut timer = TimerChannel::new(0);
+        timer.write_mode(0x0005); // Sync enable, mode 2
+
+        // Don't count when sync_signal is false
+        timer.tick(5, false);
+        assert_eq!(timer.read_counter(), 0);
+
+        // Count when sync_signal is true (rising edge resets, then counts)
+        timer.tick(10, true);
+        // Reset on edge (false -> true), then 10 cycles
+        assert_eq!(timer.read_counter(), 10);
+
+        // No edge (true -> true), continue counting
+        timer.tick(5, true);
+        assert_eq!(timer.read_counter(), 15);
+    }
+
+    #[test]
+    fn test_sync_mode_3_latch_then_free_run() {
+        let mut timer = TimerChannel::new(0);
+        timer.write_mode(0x0007); // Sync enable, mode 3
+
+        // Paused until first sync
+        timer.tick(10, false);
+        assert_eq!(timer.read_counter(), 0, "Should be paused until first sync");
+
+        // Latch on rising edge (false -> true)
+        timer.tick(1, true);
+        assert_eq!(
+            timer.read_counter(),
+            1,
+            "Should start counting on sync edge"
+        );
+        assert!(timer.sync_latched);
+
+        // Free-run after latch
+        timer.tick(10, false);
+        assert_eq!(timer.read_counter(), 11);
+
+        timer.tick(5, true);
+        assert_eq!(timer.read_counter(), 16);
+    }
+
+    #[test]
+    fn test_timer2_sync_modes_halt() {
+        let mut timer2 = TimerChannel::new(2);
+
+        // Timer 2 sync mode 0: halt
+        timer2.write_mode(0x0001); // Sync enable, mode 0
+        timer2.tick(10, false);
+        assert_eq!(
+            timer2.read_counter(),
+            0,
+            "Timer 2 mode 0 should halt counting"
+        );
+
+        // Timer 2 sync mode 3: halt
+        timer2.write_mode(0x0007); // Sync enable, mode 3
+        timer2.tick(10, false);
+        assert_eq!(
+            timer2.read_counter(),
+            0,
+            "Timer 2 mode 3 should halt counting"
+        );
+    }
+
+    #[test]
+    fn test_timer2_sync_modes_free_run() {
+        let mut timer2 = TimerChannel::new(2);
+
+        // Timer 2 sync mode 1: free-run
+        timer2.write_mode(0x0003); // Sync enable, mode 1
+        timer2.tick(10, false);
+        assert_eq!(timer2.read_counter(), 10, "Timer 2 mode 1 should free-run");
+
+        // Timer 2 sync mode 2: free-run
+        timer2.write_mode(0x0005); // Sync enable, mode 2
+        timer2.tick(10, false);
+        assert_eq!(timer2.read_counter(), 10, "Timer 2 mode 2 should free-run");
+    }
+
+    #[test]
+    fn test_clock_source_timer0() {
+        let timers = Timers::new();
+
+        // Timer 0 source 0: system clock (divider = 1)
+        assert_eq!(timers.get_clock_divider(0), 1);
+
+        // Timer 0 source 1: pixel clock (divider = 8, simplified)
+        let mut timer0 = TimerChannel::new(0);
+        timer0.mode.clock_source = 1;
+        let mut timers_with_pixel = Timers::new();
+        timers_with_pixel.channels[0] = timer0;
+        assert_eq!(timers_with_pixel.get_clock_divider(0), 8);
+    }
+
+    #[test]
+    fn test_clock_source_timer1() {
+        let timers = Timers::new();
+
+        // Timer 1 source 0: system clock (divider = 1)
+        assert_eq!(timers.get_clock_divider(1), 1);
+
+        // Timer 1 source 1: hblank (divider = 2146)
+        let mut timer1 = TimerChannel::new(1);
+        timer1.mode.clock_source = 1;
+        let mut timers_with_hblank = Timers::new();
+        timers_with_hblank.channels[1] = timer1;
+        assert_eq!(timers_with_hblank.get_clock_divider(1), 2146);
+    }
+
+    #[test]
+    fn test_clock_source_timer2() {
+        let timers = Timers::new();
+
+        // Timer 2 source 0: system clock (divider = 1)
+        assert_eq!(timers.get_clock_divider(2), 1);
+
+        // Timer 2 source 2: system clock / 8 (divider = 8)
+        let mut timer2 = TimerChannel::new(2);
+        timer2.mode.clock_source = 2;
+        let mut timers_with_div8 = Timers::new();
+        timers_with_div8.channels[2] = timer2;
+        assert_eq!(timers_with_div8.get_clock_divider(2), 8);
+    }
+
+    #[test]
+    fn test_timers_tick_all_channels() {
+        let mut timers = Timers::new();
+
+        // Configure all timers to count freely
+        timers.channel_mut(0).write_mode(0x0000);
+        timers.channel_mut(1).write_mode(0x0000);
+        timers.channel_mut(2).write_mode(0x0000);
+
+        timers.tick(10, false, false);
+
+        assert_eq!(timers.channel(0).read_counter(), 10);
+        assert_eq!(timers.channel(1).read_counter(), 10);
+        assert_eq!(timers.channel(2).read_counter(), 10);
+    }
+
+    #[test]
+    fn test_timer1_hblank_clock_source() {
+        let mut timers = Timers::new();
+
+        // Timer 1 with hblank clock source (bit 8 = 1)
+        timers.channel_mut(1).write_mode(0x0100); // clock_source = 1
+
+        // When hblank is false, no ticks
+        timers.tick(100, false, false);
+        assert_eq!(timers.channel(1).read_counter(), 0);
+
+        // When hblank is true, tick by 1 per call
+        timers.tick(100, true, false);
+        assert_eq!(timers.channel(1).read_counter(), 1);
+    }
+
+    #[test]
+    fn test_timer1_vblank_sync_signal() {
+        let mut timers = Timers::new();
+
+        // Timer 1 with sync mode 0 (pause during sync)
+        timers.channel_mut(1).write_mode(0x0001); // sync_enable = 1, mode = 0
+
+        // Count when vblank is false
+        timers.tick(10, false, false);
+        assert_eq!(timers.channel(1).read_counter(), 10);
+
+        // Pause when vblank is true
+        timers.tick(10, false, true);
+        assert_eq!(
+            timers.channel(1).read_counter(),
+            10,
+            "Should pause during vblank"
+        );
+    }
+
+    #[test]
+    fn test_timer2_divide_by_8_accumulator() {
+        let mut timers = Timers::new();
+
+        // Timer 2 with system/8 clock source (bit 9 = 1)
+        timers.channel_mut(2).write_mode(0x0200); // clock_source = 2
+
+        // Tick by 7 cycles: accumulator = 7, counter = 0
+        timers.tick(7, false, false);
+        assert_eq!(timers.channel(2).read_counter(), 0);
+        assert_eq!(timers.timer2_div_accum, 7);
+
+        // Tick by 1 more cycle: accumulator = 0, counter = 1
+        timers.tick(1, false, false);
+        assert_eq!(timers.channel(2).read_counter(), 1);
+        assert_eq!(timers.timer2_div_accum, 0);
+
+        // Tick by 16 cycles: accumulator = 0, counter = 3
+        timers.tick(16, false, false);
+        assert_eq!(timers.channel(2).read_counter(), 3);
+        assert_eq!(timers.timer2_div_accum, 0);
+    }
+
+    #[test]
+    fn test_timer2_divide_by_8_fractional_cycles() {
+        let mut timers = Timers::new();
+
+        // Timer 2 with system/8 clock source
+        timers.channel_mut(2).write_mode(0x0200);
+
+        // Tick by 5 cycles repeatedly
+        for _ in 0..8 {
+            timers.tick(5, false, false);
+        }
+
+        // Total: 40 cycles = 5 timer increments
+        assert_eq!(timers.channel(2).read_counter(), 5);
+        assert_eq!(timers.timer2_div_accum, 0);
+    }
+
+    #[test]
+    fn test_timer2_switch_clock_source_resets_accumulator() {
+        let mut timers = Timers::new();
+
+        // Start with divide-by-8
+        timers.channel_mut(2).write_mode(0x0200);
+        timers.tick(5, false, false);
+        assert_eq!(timers.timer2_div_accum, 5);
+
+        // Switch to system clock
+        timers.channel_mut(2).write_mode(0x0000);
+        timers.tick(10, false, false);
+
+        // Accumulator should be reset to 0 when not in divide-by-8 mode
+        assert_eq!(timers.timer2_div_accum, 0);
+        assert_eq!(timers.channel(2).read_counter(), 10);
+    }
+
+    #[test]
+    fn test_irq_ack() {
+        let mut timer = TimerChannel::new(0);
+        timer.write_target(10);
+        timer.write_mode(0x0010); // IRQ on target
+
+        timer.tick(10, false);
+        assert!(timer.irq_pending());
+
+        timer.ack_irq();
+        assert!(!timer.irq_pending(), "IRQ should be cleared after ack");
+    }
+
+    #[test]
+    fn test_multiple_irq_conditions() {
+        let mut timer = TimerChannel::new(0);
+        timer.write_target(0xFFFF);
+        timer.write_mode(0x0030); // IRQ on both target and max
+        timer.write_counter(0xFFFE);
+
+        let irq = timer.tick(1, false);
+        assert!(irq, "Should trigger IRQ when reaching 0xFFFF");
+        assert!(timer.reached_target);
+        assert!(timer.reached_max);
+    }
+
+    #[test]
+    fn test_rising_edge_detection() {
+        let mut timer = TimerChannel::new(0);
+        timer.write_mode(0x0003); // Sync enable, mode 1 (reset on edge)
+
+        // Count when sync is false
+        timer.tick(5, false);
+        assert_eq!(timer.read_counter(), 5);
+
+        // Rising edge (false -> true) causes reset, then counts
+        timer.tick(5, true);
+        // Reset to 0, then increment by 5 = 5
+        assert_eq!(timer.read_counter(), 5, "Reset on rising edge, then count");
+
+        // No edge (true -> true), continue counting
+        timer.tick(3, true);
+        assert_eq!(timer.read_counter(), 8);
+
+        // Falling edge (true -> false), then rising edge (false -> true)
+        timer.tick(1, false);
+        assert_eq!(timer.read_counter(), 9);
+
+        timer.tick(1, true);
+        // Reset on rising edge, then increment by 1
+        assert_eq!(timer.read_counter(), 1, "Should reset on rising edge");
+    }
+
+    #[test]
+    fn test_target_write_sets_reschedule_flag() {
+        let mut timer = TimerChannel::new(0);
+        assert!(!timer.needs_reschedule);
+
+        timer.write_target(100);
+        assert!(
+            timer.needs_reschedule,
+            "Writing target should set needs_reschedule"
+        );
+    }
+
+    #[test]
+    fn test_mode_write_sets_reschedule_flag() {
+        let mut timer = TimerChannel::new(0);
+        assert!(!timer.needs_reschedule);
+
+        timer.write_mode(0x0010);
+        assert!(
+            timer.needs_reschedule,
+            "Writing mode should set needs_reschedule"
+        );
+    }
+
+    #[test]
+    fn test_timers_default() {
+        let timers = Timers::default();
+        assert_eq!(timers.channel(0).read_counter(), 0);
+        assert_eq!(timers.channel(1).read_counter(), 0);
+        assert_eq!(timers.channel(2).read_counter(), 0);
+    }
+
+    #[test]
+    fn test_timer_mode_default() {
+        let mode = TimerMode::default();
+        assert!(!mode.sync_enable);
+        assert_eq!(mode.sync_mode, 0);
+        assert!(!mode.reset_on_target);
+        assert!(!mode.irq_on_target);
+        assert!(!mode.irq_on_max);
+        assert!(!mode.irq_repeat);
+        assert!(!mode.irq_pulse_mode);
+        assert_eq!(mode.clock_source, 0);
+    }
+
+    #[test]
+    fn test_sync_mode_edge_cases() {
+        let mut timer = TimerChannel::new(0);
+
+        // Test that sync mode 3 latch is cleared on mode write
+        timer.sync_latched = true;
+        timer.write_mode(0x0007);
+        assert!(!timer.sync_latched, "Mode write should clear sync_latched");
+    }
+
+    #[test]
+    fn test_counter_and_target_at_zero() {
+        let mut timer = TimerChannel::new(0);
+        timer.write_target(0);
+        timer.write_mode(0x0010); // IRQ on target
+
+        // Counter starts at 0, target is 0, should immediately match
+        assert_eq!(timer.read_counter(), 0);
+        assert_eq!(timer.read_target(), 0);
+
+        // First tick should not trigger (counter starts at 0, increments to 1)
+        let irq = timer.tick(1, false);
+        assert!(!irq, "Should not trigger when target is 0");
+    }
+
+    #[test]
+    fn test_all_sync_modes_with_free_run() {
+        let mut timer = TimerChannel::new(0);
+
+        // Test all sync modes 0-3 with sync disabled (free-run)
+        for mode in 0..=3 {
+            timer.write_mode((mode << 1) as u16); // sync_enable = 0, sync_mode = mode
+            timer.tick(10, false);
+            assert_eq!(
+                timer.read_counter(),
+                10,
+                "All sync modes should free-run when sync_enable = 0"
+            );
+        }
+    }
+}
