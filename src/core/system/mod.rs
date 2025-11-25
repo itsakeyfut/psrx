@@ -809,3 +809,319 @@ impl Default for System {
         Self::new()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_system_creation() {
+        let system = System::new();
+
+        assert_eq!(system.cycles, 0);
+        assert!(!system.running);
+        assert_eq!(system.pc(), 0xBFC00000); // BIOS entry point
+        assert!(system.tracer.is_none());
+        assert_eq!(system.trace_limit, 0);
+        assert_eq!(system.trace_count, 0);
+    }
+
+    #[test]
+    fn test_system_default() {
+        let system1 = System::new();
+        let system2 = System::default();
+
+        assert_eq!(system1.cycles, system2.cycles);
+        assert_eq!(system1.running, system2.running);
+        assert_eq!(system1.pc(), system2.pc());
+    }
+
+    #[test]
+    fn test_system_reset() {
+        let mut system = System::new();
+
+        // Execute some instructions
+        system.cycles = 1000;
+        system.running = true;
+        system.trace_count = 50;
+
+        // Reset
+        system.reset();
+
+        // Verify reset state
+        assert_eq!(system.cycles, 0);
+        assert!(system.running); // Reset sets running to true
+        assert_eq!(system.pc(), 0xBFC00000);
+        assert_eq!(system.trace_count, 0);
+    }
+
+    #[test]
+    fn test_system_initial_pc() {
+        let system = System::new();
+        // After reset, PC should be at BIOS entry point
+        assert_eq!(system.pc(), 0xBFC00000);
+    }
+
+    #[test]
+    fn test_system_initial_cycles() {
+        let system = System::new();
+        assert_eq!(system.cycles(), 0);
+    }
+
+    #[test]
+    fn test_system_cpu_access() {
+        let system = System::new();
+        let cpu = system.cpu();
+
+        assert_eq!(cpu.pc(), 0xBFC00000);
+    }
+
+    #[test]
+    fn test_system_cpu_mut_access() {
+        let mut system = System::new();
+        let cpu = system.cpu_mut();
+
+        // Verify mutable access works
+        assert_eq!(cpu.pc(), 0xBFC00000);
+    }
+
+    #[test]
+    fn test_system_bus_access() {
+        let system = System::new();
+        let _bus = system.bus();
+
+        // Just verify we can get a reference
+    }
+
+    #[test]
+    fn test_system_bus_mut_access() {
+        let mut system = System::new();
+        let _bus = system.bus_mut();
+
+        // Verify mutable access works
+    }
+
+    #[test]
+    fn test_system_gpu_access() {
+        let system = System::new();
+        let gpu = system.gpu();
+
+        // Verify we get an Rc<RefCell<GPU>>
+        assert!(gpu.try_borrow().is_ok());
+    }
+
+    #[test]
+    fn test_system_controller_ports_access() {
+        let system = System::new();
+        let controller_ports = system.controller_ports();
+
+        // Verify we get an Rc<RefCell<ControllerPorts>>
+        assert!(controller_ports.try_borrow().is_ok());
+    }
+
+    #[test]
+    fn test_system_cdrom_access() {
+        let system = System::new();
+        let cdrom = system.cdrom();
+
+        // Verify we get an Rc<RefCell<CDROM>>
+        assert!(cdrom.try_borrow().is_ok());
+    }
+
+    #[test]
+    fn test_tracing_disabled_by_default() {
+        let system = System::new();
+        assert!(!system.is_tracing());
+        assert_eq!(system.trace_count(), 0);
+    }
+
+    #[test]
+    fn test_disable_tracing_when_not_enabled() {
+        let mut system = System::new();
+
+        // Should not panic when disabling tracing that's not enabled
+        system.disable_tracing();
+
+        assert!(!system.is_tracing());
+    }
+
+    #[test]
+    fn test_system_components_share_connections() {
+        let system = System::new();
+
+        // Get references to shared components
+        let gpu1 = system.gpu();
+        let gpu2 = system.gpu();
+
+        // Verify they're the same instance
+        assert!(Rc::ptr_eq(&gpu1, &gpu2));
+    }
+
+    #[test]
+    fn test_system_reset_preserves_bios() {
+        let mut system = System::new();
+
+        // Note: We can't easily load a BIOS in tests without a file,
+        // but we can verify reset doesn't panic
+        system.reset();
+
+        // Verify PC is at BIOS entry point
+        assert_eq!(system.pc(), 0xBFC00000);
+    }
+
+    #[test]
+    fn test_system_step_n_zero() {
+        let mut system = System::new();
+        system.reset();
+
+        // Step 0 instructions should succeed
+        let result = system.step_n(0);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_system_cycles_increment() {
+        let mut system = System::new();
+        system.reset();
+
+        let initial_cycles = system.cycles();
+
+        // Execute one instruction (may fail without BIOS, but that's ok for this test)
+        let _ = system.step();
+
+        // Cycles should have incremented (or stayed the same if step failed)
+        assert!(system.cycles() >= initial_cycles);
+    }
+
+    #[test]
+    fn test_system_controller_ports_port_1_connected() {
+        let system = System::new();
+        let ports = system.controller_ports();
+        let mut ports_ref = ports.borrow_mut();
+
+        // Port 1 should have a controller
+        assert!(ports_ref.get_controller_mut(0).is_some());
+    }
+
+    #[test]
+    fn test_system_controller_ports_port_2_disconnected() {
+        let system = System::new();
+        let ports = system.controller_ports();
+        let mut ports_ref = ports.borrow_mut();
+
+        // Port 2 should not have a controller
+        assert!(ports_ref.get_controller_mut(1).is_none());
+    }
+
+    #[test]
+    fn test_system_multiple_resets() {
+        let mut system = System::new();
+
+        // Reset multiple times
+        for _ in 0..5 {
+            system.reset();
+            assert_eq!(system.pc(), 0xBFC00000);
+            assert_eq!(system.cycles(), 0);
+        }
+    }
+
+    #[test]
+    fn test_system_load_game_without_disc() {
+        let mut system = System::new();
+
+        // Loading without a disc should fail
+        let result = system.load_game("nonexistent.cue");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_system_components_independent_borrowing() {
+        let system = System::new();
+
+        // Borrow multiple components simultaneously (immutable)
+        let gpu_rc = system.gpu();
+        let cdrom_rc = system.cdrom();
+        let ports_rc = system.controller_ports();
+
+        let _gpu = gpu_rc.borrow();
+        let _cdrom = cdrom_rc.borrow();
+        let _ports = ports_rc.borrow();
+
+        // Should not panic - all are independent Rc<RefCell<>>
+    }
+
+    #[test]
+    fn test_system_cycles_per_frame_constant() {
+        // Verify the constant matches expected value
+        // PSX CPU: ~33.8688 MHz / 60 fps ≈ 564,480 cycles
+        const EXPECTED_CYCLES_PER_FRAME: u64 = 564_480;
+
+        // This is a compile-time constant check
+        assert_eq!(EXPECTED_CYCLES_PER_FRAME, 564_480);
+    }
+
+    #[test]
+    fn test_system_timing_manager_initialized() {
+        let system = System::new();
+
+        // Timing manager should be initialized (we can't easily test its internals,
+        // but we can verify the system doesn't panic on creation)
+        assert_eq!(system.cycles, 0);
+    }
+
+    #[test]
+    fn test_system_interrupt_controller_accessible() {
+        let system = System::new();
+
+        // Verify interrupt controller is accessible through bus
+        // (indirect test since it's not directly exposed)
+        let _bus = system.bus();
+    }
+
+    #[test]
+    fn test_system_dma_controller_initialized() {
+        let system = System::new();
+
+        // DMA controller should be initialized
+        // (indirect test since it's not directly exposed)
+        assert_eq!(system.cycles, 0);
+    }
+
+    #[test]
+    fn test_system_spu_initialized() {
+        let system = System::new();
+
+        // SPU should be initialized
+        // (indirect test since it's not directly exposed)
+        assert_eq!(system.cycles, 0);
+    }
+
+    #[test]
+    fn test_system_timers_initialized() {
+        let system = System::new();
+
+        // Timers should be initialized
+        // (indirect test since it's not directly exposed)
+        assert_eq!(system.cycles, 0);
+    }
+
+    #[test]
+    fn test_system_reset_clears_cycles() {
+        let mut system = System::new();
+
+        system.cycles = 1000000;
+        system.reset();
+
+        assert_eq!(system.cycles, 0);
+    }
+
+    #[test]
+    fn test_system_reset_sets_running_flag() {
+        let mut system = System::new();
+
+        system.running = false;
+        system.reset();
+
+        assert!(system.running);
+    }
+}

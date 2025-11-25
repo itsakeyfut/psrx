@@ -236,3 +236,340 @@ impl Default for ControllerPorts {
         Self::new()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_controller_ports_creation() {
+        let ports = ControllerPorts::new();
+        assert_eq!(ports.tx_data, 0xFF);
+        assert_eq!(ports.rx_data, 0xFF);
+        assert_eq!(ports.stat, 0x05); // TX ready | RX ready
+        assert_eq!(ports.mode, 0x000D);
+        assert_eq!(ports.ctrl, 0);
+        assert_eq!(ports.baud, 0);
+        assert!(
+            ports.controllers[0].is_some(),
+            "Port 1 should have controller"
+        );
+        assert!(ports.controllers[1].is_none(), "Port 2 should be empty");
+        assert!(ports.selected_port.is_none(), "No port should be selected");
+    }
+
+    #[test]
+    fn test_controller_ports_default() {
+        let ports1 = ControllerPorts::new();
+        let ports2 = ControllerPorts::default();
+
+        assert_eq!(ports1.stat, ports2.stat);
+        assert_eq!(ports1.mode, ports2.mode);
+        assert_eq!(ports1.ctrl, ports2.ctrl);
+    }
+
+    #[test]
+    fn test_read_stat_register() {
+        let ports = ControllerPorts::new();
+        let stat = ports.read_stat();
+        assert_eq!(stat, 0x05);
+
+        // Verify TX ready (bit 0) is set
+        assert_eq!(stat & 0x01, 0x01, "TX ready flag should be set");
+        // Verify RX ready (bit 2) is set
+        assert_eq!(stat & 0x04, 0x04, "RX ready flag should be set");
+    }
+
+    #[test]
+    fn test_read_mode_register() {
+        let ports = ControllerPorts::new();
+        assert_eq!(ports.read_mode(), 0x000D);
+    }
+
+    #[test]
+    fn test_write_mode_register() {
+        let mut ports = ControllerPorts::new();
+        ports.write_mode(0x1234);
+        assert_eq!(ports.read_mode(), 0x1234);
+    }
+
+    #[test]
+    fn test_read_ctrl_register() {
+        let ports = ControllerPorts::new();
+        assert_eq!(ports.read_ctrl(), 0);
+    }
+
+    #[test]
+    fn test_read_baud_register() {
+        let ports = ControllerPorts::new();
+        assert_eq!(ports.read_baud(), 0);
+    }
+
+    #[test]
+    fn test_write_baud_register() {
+        let mut ports = ControllerPorts::new();
+        ports.write_baud(0x5678);
+        assert_eq!(ports.read_baud(), 0x5678);
+    }
+
+    #[test]
+    fn test_write_tx_data_no_controller_selected() {
+        let mut ports = ControllerPorts::new();
+
+        ports.write_tx_data(0x42);
+
+        // Should return 0xFF when no controller selected
+        assert_eq!(ports.rx_data, 0xFF);
+        // RX ready flag (bit 1) should be set
+        assert_eq!(ports.stat & 0x02, 0x02);
+    }
+
+    #[test]
+    fn test_write_tx_data_with_controller_selected() {
+        let mut ports = ControllerPorts::new();
+
+        // Select port 1 (bit 1 set, bit 13 clear)
+        ports.write_ctrl(0x0002);
+        assert_eq!(ports.selected_port, Some(0));
+
+        // Write data to controller
+        ports.write_tx_data(0x01);
+
+        // Should receive response from controller (not 0xFF)
+        assert_eq!(ports.rx_data, 0xFF); // Controller initial state returns 0xFF
+                                         // RX ready flag should be set
+        assert_eq!(ports.stat & 0x02, 0x02);
+    }
+
+    #[test]
+    fn test_write_tx_data_port_2_no_controller() {
+        let mut ports = ControllerPorts::new();
+
+        // Select port 2 (bit 1 set, bit 13 set)
+        ports.write_ctrl(0x2002);
+        assert_eq!(ports.selected_port, Some(1));
+
+        // Write data when no controller in port 2
+        ports.write_tx_data(0x42);
+
+        // Should return 0xFF (no controller)
+        assert_eq!(ports.rx_data, 0xFF);
+    }
+
+    #[test]
+    fn test_read_rx_data_clears_flag() {
+        let mut ports = ControllerPorts::new();
+
+        // Write to set RX ready flag
+        ports.write_tx_data(0x42);
+        assert_eq!(ports.stat & 0x02, 0x02, "RX ready should be set");
+
+        // Read RX data
+        let data = ports.read_rx_data();
+        assert_eq!(data, 0xFF);
+
+        // RX ready flag should be cleared
+        assert_eq!(
+            ports.stat & 0x02,
+            0,
+            "RX ready should be cleared after read"
+        );
+    }
+
+    #[test]
+    fn test_controller_select_port_1() {
+        let mut ports = ControllerPorts::new();
+
+        // Select port 1 (bit 1 set, bit 13 clear)
+        ports.write_ctrl(0x0002);
+
+        assert_eq!(ports.selected_port, Some(0), "Port 1 should be selected");
+        assert_eq!(ports.ctrl, 0x0002);
+    }
+
+    #[test]
+    fn test_controller_select_port_2() {
+        let mut ports = ControllerPorts::new();
+
+        // Select port 2 (bit 1 set, bit 13 set)
+        ports.write_ctrl(0x2002);
+
+        assert_eq!(ports.selected_port, Some(1), "Port 2 should be selected");
+        assert_eq!(ports.ctrl, 0x2002);
+    }
+
+    #[test]
+    fn test_controller_deselect() {
+        let mut ports = ControllerPorts::new();
+
+        // Select port 1
+        ports.write_ctrl(0x0002);
+        assert_eq!(ports.selected_port, Some(0));
+
+        // Deselect (bit 1 clear)
+        ports.write_ctrl(0x0000);
+
+        assert!(ports.selected_port.is_none(), "No port should be selected");
+    }
+
+    #[test]
+    fn test_acknowledge_interrupt() {
+        let mut ports = ControllerPorts::new();
+
+        // Set IRQ flag manually
+        ports.stat |= 0x0200;
+        assert_eq!(ports.stat & 0x0200, 0x0200, "IRQ flag should be set");
+
+        // Write ACK bit (bit 4)
+        ports.write_ctrl(0x0010);
+
+        // IRQ flag should be cleared
+        assert_eq!(ports.stat & 0x0200, 0, "IRQ flag should be cleared");
+    }
+
+    #[test]
+    fn test_multiple_transfers() {
+        let mut ports = ControllerPorts::new();
+
+        // Select port 1
+        ports.write_ctrl(0x0002);
+
+        // Transfer multiple bytes
+        ports.write_tx_data(0x01);
+        let _rx1 = ports.read_rx_data();
+
+        ports.write_tx_data(0x42);
+        let _rx2 = ports.read_rx_data();
+
+        ports.write_tx_data(0x00);
+        let _rx3 = ports.read_rx_data();
+
+        // Verify port still selected
+        assert_eq!(ports.selected_port, Some(0));
+    }
+
+    #[test]
+    fn test_get_controller_mut_port_1() {
+        let mut ports = ControllerPorts::new();
+
+        let controller = ports.get_controller_mut(0);
+        assert!(controller.is_some(), "Port 1 should have controller");
+    }
+
+    #[test]
+    fn test_get_controller_mut_port_2() {
+        let mut ports = ControllerPorts::new();
+
+        let controller = ports.get_controller_mut(1);
+        assert!(controller.is_none(), "Port 2 should not have controller");
+    }
+
+    #[test]
+    fn test_get_controller_mut_invalid_port() {
+        let mut ports = ControllerPorts::new();
+
+        let controller = ports.get_controller_mut(2);
+        assert!(controller.is_none(), "Invalid port should return None");
+    }
+
+    #[test]
+    fn test_stat_register_persistence() {
+        let mut ports = ControllerPorts::new();
+
+        // Write data to set RX ready
+        ports.write_tx_data(0x42);
+        let stat1 = ports.read_stat();
+
+        // Read RX data to clear flag
+        let _rx = ports.read_rx_data();
+        let stat2 = ports.read_stat();
+
+        // Verify flag was cleared
+        assert_ne!(stat1 & 0x02, stat2 & 0x02, "RX ready flag should change");
+    }
+
+    #[test]
+    fn test_ctrl_register_select_bit_combinations() {
+        let mut ports = ControllerPorts::new();
+
+        // Test various bit combinations
+        let test_values = [
+            (0x0000, None),    // No select
+            (0x0002, Some(0)), // Port 1
+            (0x2002, Some(1)), // Port 2
+            (0x0003, Some(0)), // Port 1 with extra bits
+            (0x2003, Some(1)), // Port 2 with extra bits
+        ];
+
+        for (ctrl_value, expected_port) in &test_values {
+            ports.write_ctrl(*ctrl_value);
+            assert_eq!(
+                ports.selected_port, *expected_port,
+                "CTRL value 0x{:04X} should select port {:?}",
+                ctrl_value, expected_port
+            );
+        }
+    }
+
+    #[test]
+    fn test_rx_data_initial_value() {
+        let ports = ControllerPorts::new();
+        assert_eq!(ports.rx_data, 0xFF, "RX data should initialize to 0xFF");
+    }
+
+    #[test]
+    fn test_tx_data_initial_value() {
+        let ports = ControllerPorts::new();
+        assert_eq!(ports.tx_data, 0xFF, "TX data should initialize to 0xFF");
+    }
+
+    #[test]
+    fn test_controller_transfer_sequence() {
+        let mut ports = ControllerPorts::new();
+
+        // Standard controller query sequence
+        ports.write_ctrl(0x0002); // Select port 1
+
+        // Send ID command
+        ports.write_tx_data(0x01);
+        let _response = ports.read_rx_data();
+
+        // Send button request
+        ports.write_tx_data(0x42);
+        let _response = ports.read_rx_data();
+
+        // Deselect
+        ports.write_ctrl(0x0000);
+
+        assert!(ports.selected_port.is_none());
+    }
+
+    #[test]
+    fn test_baud_rate_independence() {
+        let mut ports = ControllerPorts::new();
+
+        // Baud rate should not affect other operations
+        ports.write_baud(0xFFFF);
+
+        ports.write_ctrl(0x0002);
+        assert_eq!(ports.selected_port, Some(0));
+
+        ports.write_tx_data(0x42);
+        let _rx = ports.read_rx_data();
+
+        // Baud rate should remain unchanged
+        assert_eq!(ports.read_baud(), 0xFFFF);
+    }
+
+    #[test]
+    fn test_mode_register_independence() {
+        let mut ports = ControllerPorts::new();
+
+        // Mode should not affect controller selection
+        ports.write_mode(0xABCD);
+        ports.write_ctrl(0x0002);
+
+        assert_eq!(ports.selected_port, Some(0));
+        assert_eq!(ports.read_mode(), 0xABCD);
+    }
+}
