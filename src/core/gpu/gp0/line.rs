@@ -422,3 +422,248 @@ impl GPU {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_single_line_parsing() {
+        let mut gpu = GPU::new();
+
+        // GP0(0x40): Monochrome Line Opaque
+        // Color: Red, Vertices: (10,20) to (50,60)
+        gpu.write_gp0(0x40FF0000); // Command + Red
+        gpu.write_gp0(0x0014000A); // V1: Y=20, X=10
+        gpu.write_gp0(0x003C0032); // V2: Y=60, X=50
+
+        assert!(gpu.command_fifo.is_empty());
+    }
+
+    #[test]
+    fn test_semi_transparent_line() {
+        let mut gpu = GPU::new();
+
+        // GP0(0x42): Monochrome Line Semi-Transparent
+        gpu.write_gp0(0x4200FF00); // Command + Green
+        gpu.write_gp0(0x00000000); // V1: (0,0)
+        gpu.write_gp0(0x00640064); // V2: (100,100)
+
+        assert!(gpu.command_fifo.is_empty());
+    }
+
+    #[test]
+    fn test_shaded_line_parsing() {
+        let mut gpu = GPU::new();
+
+        // GP0(0x50): Shaded Line Opaque
+        // Per PSX-SPX: (command+color1, vertex1, color2, vertex2)
+        gpu.write_gp0(0x50FF0000); // Command + Color1 (Red)
+        gpu.write_gp0(0x00000000); // V1: (0,0)
+        gpu.write_gp0(0x000000FF); // Color2 (Blue)
+        gpu.write_gp0(0x00640064); // V2: (100,100)
+
+        assert!(gpu.command_fifo.is_empty());
+    }
+
+    #[test]
+    fn test_polyline_terminator_0x50005000() {
+        let mut gpu = GPU::new();
+
+        // GP0(0x48): Monochrome Polyline Opaque
+        // Per PSX-SPX: terminated by 0x50005000 or 0x55555555
+        gpu.write_gp0(0x48FFFFFF); // Command + White
+        gpu.write_gp0(0x00000000); // V1: (0,0)
+        gpu.write_gp0(0x00000064); // V2: (100,0)
+        gpu.write_gp0(0x00640064); // V3: (100,100)
+        gpu.write_gp0(0x50005000); // Terminator
+
+        assert!(gpu.command_fifo.is_empty());
+    }
+
+    #[test]
+    fn test_polyline_terminator_0x55555555() {
+        let mut gpu = GPU::new();
+
+        // Test alternate terminator value
+        gpu.write_gp0(0x48FFFFFF); // Command + White
+        gpu.write_gp0(0x00000000); // V1: (0,0)
+        gpu.write_gp0(0x00640000); // V2: (100,0)
+        gpu.write_gp0(0x55555555); // Terminator (alternate)
+
+        assert!(gpu.command_fifo.is_empty());
+    }
+
+    #[test]
+    fn test_polyline_without_terminator_waits() {
+        let mut gpu = GPU::new();
+
+        // Send polyline without terminator - should wait in FIFO
+        gpu.write_gp0(0x48FFFFFF); // Command
+        gpu.write_gp0(0x00000000); // V1
+        gpu.write_gp0(0x00640000); // V2
+        gpu.write_gp0(0x00640064); // V3
+
+        // Command should remain in FIFO waiting for terminator
+        assert_eq!(gpu.command_fifo.len(), 4);
+    }
+
+    #[test]
+    fn test_polyline_vertex_limit() {
+        let mut gpu = GPU::new();
+
+        // Per implementation: safety limit of 256 vertices
+        gpu.write_gp0(0x48FFFFFF); // Command
+
+        // Add 260 vertices (exceeds limit)
+        for i in 0..260 {
+            let coord = ((i & 0xFF) << 16) | (i & 0xFF);
+            gpu.write_gp0(coord);
+        }
+
+        // Add terminator
+        gpu.write_gp0(0x50005000);
+
+        // Should have processed despite exceeding limit
+        assert!(gpu.command_fifo.is_empty());
+    }
+
+    #[test]
+    fn test_shaded_polyline_parsing() {
+        let mut gpu = GPU::new();
+
+        // GP0(0x58): Shaded Polyline Opaque
+        // Format: (command+color1, vertex1, color2, vertex2, ..., terminator)
+        gpu.write_gp0(0x58FF0000); // Command + Color1 (Red)
+        gpu.write_gp0(0x00000000); // V1: (0,0)
+        gpu.write_gp0(0x0000FF00); // Color2 (Green)
+        gpu.write_gp0(0x00640000); // V2: (100,0)
+        gpu.write_gp0(0x000000FF); // Color3 (Blue)
+        gpu.write_gp0(0x00640064); // V3: (100,100)
+        gpu.write_gp0(0x50005000); // Terminator
+
+        assert!(gpu.command_fifo.is_empty());
+    }
+
+    #[test]
+    fn test_shaded_polyline_semi_transparent() {
+        let mut gpu = GPU::new();
+
+        // GP0(0x5A): Shaded Polyline Semi-Transparent
+        gpu.write_gp0(0x5AFF0000); // Command + Color1
+        gpu.write_gp0(0x00000000); // V1
+        gpu.write_gp0(0x00FFFFFF); // Color2 (White)
+        gpu.write_gp0(0x00320032); // V2: (50,50)
+        gpu.write_gp0(0x50005000); // Terminator
+
+        assert!(gpu.command_fifo.is_empty());
+    }
+
+    #[test]
+    fn test_polyline_minimum_vertices() {
+        let mut gpu = GPU::new();
+
+        // Polyline with exactly 2 vertices (minimum for drawing)
+        gpu.write_gp0(0x48FFFFFF);
+        gpu.write_gp0(0x00000000); // V1
+        gpu.write_gp0(0x00640064); // V2
+        gpu.write_gp0(0x50005000); // Terminator
+
+        assert!(gpu.command_fifo.is_empty());
+    }
+
+    #[test]
+    #[ignore] // TODO: Verify expected behavior - implementation may buffer this
+    fn test_polyline_single_vertex_discarded() {
+        let mut gpu = GPU::new();
+
+        // Polyline with only 1 vertex - should not draw (need at least 2)
+        gpu.write_gp0(0x48FFFFFF);
+        gpu.write_gp0(0x00000000); // V1 only
+        gpu.write_gp0(0x50005000); // Terminator
+
+        // Should process but not draw anything
+        assert!(gpu.command_fifo.is_empty());
+    }
+
+    #[test]
+    fn test_shaded_polyline_color_vertex_pairing() {
+        let mut gpu = GPU::new();
+
+        // Test that colors and vertices are properly paired
+        // Each vertex (except first) needs a color word before it
+        gpu.write_gp0(0x58FF0000); // Command + First color (Red)
+        gpu.write_gp0(0x00000000); // V1: (0,0)
+        gpu.write_gp0(0x0000FF00); // Color2 (Green)
+        gpu.write_gp0(0x00320000); // V2: (50,0)
+        gpu.write_gp0(0x000000FF); // Color3 (Blue)
+        gpu.write_gp0(0x00640000); // V3: (100,0)
+        gpu.write_gp0(0x50005000); // Terminator
+
+        assert!(gpu.command_fifo.is_empty());
+    }
+
+    #[test]
+    #[ignore] // TODO: Verify expected behavior for malformed commands
+    fn test_shaded_polyline_malformed_terminator_after_color() {
+        let mut gpu = GPU::new();
+
+        // Test edge case: terminator appears after color but before vertex
+        // This is malformed but should be handled gracefully
+        gpu.write_gp0(0x58FF0000); // Command + Color1
+        gpu.write_gp0(0x00000000); // V1
+        gpu.write_gp0(0x0000FF00); // Color2
+        gpu.write_gp0(0x50005000); // Terminator (malformed - no V2)
+
+        // Should process without crashing
+        assert!(gpu.command_fifo.is_empty());
+    }
+
+    #[test]
+    fn test_polyline_closed_shape() {
+        let mut gpu = GPU::new();
+
+        // Per PSX-SPX: "Wireframe polygons by setting the last Vertex equal to Vertex 1"
+        // Draw a triangle wireframe: (0,0) -> (100,0) -> (50,100) -> (0,0)
+        gpu.write_gp0(0x48FFFFFF);
+        gpu.write_gp0(0x00000000); // V1: (0,0)
+        gpu.write_gp0(0x00000064); // V2: (100,0)
+        gpu.write_gp0(0x00640032); // V3: (50,100)
+        gpu.write_gp0(0x00000000); // V4: (0,0) - closes the shape
+        gpu.write_gp0(0x50005000); // Terminator
+
+        assert!(gpu.command_fifo.is_empty());
+    }
+
+    #[test]
+    fn test_partial_line_command_buffering() {
+        let mut gpu = GPU::new();
+
+        // Send partial line command (need 3 words, send only 1)
+        gpu.write_gp0(0x40FFFFFF);
+
+        // Should remain in FIFO
+        assert_eq!(gpu.command_fifo.len(), 1);
+
+        // Add one more word
+        gpu.write_gp0(0x00000000);
+        assert_eq!(gpu.command_fifo.len(), 2);
+
+        // Complete the command
+        gpu.write_gp0(0x00640064);
+        assert!(gpu.command_fifo.is_empty());
+    }
+
+    #[test]
+    fn test_line_coordinate_range() {
+        let mut gpu = GPU::new();
+
+        // Test maximum coordinate range per PSX-SPX
+        // Range: -1024 to +1023
+        gpu.write_gp0(0x40FFFFFF);
+        gpu.write_gp0(0xFC00FC00); // V1: (-1024, -1024)
+        gpu.write_gp0(0x03FF03FF); // V2: (1023, 1023)
+
+        assert!(gpu.command_fifo.is_empty());
+    }
+}

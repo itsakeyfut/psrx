@@ -912,3 +912,346 @@ impl GPU {
         );
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Monochrome Rectangle Tests
+
+    #[test]
+    fn test_monochrome_rect_variable_size() {
+        let mut gpu = GPU::new();
+
+        // GP0(0x60): Variable Size Rectangle Opaque
+        gpu.write_gp0(0x60FF0000); // Command + Red
+        gpu.write_gp0(0x00320032); // Vertex: (50, 50)
+        gpu.write_gp0(0x00640064); // Size: Width=100, Height=100
+
+        assert!(gpu.command_fifo.is_empty());
+    }
+
+    #[test]
+    fn test_monochrome_rect_1x1() {
+        let mut gpu = GPU::new();
+
+        // GP0(0x68): 1×1 Rectangle Opaque
+        gpu.write_gp0(0x680000FF); // Command + Blue
+        gpu.write_gp0(0x00640064); // Vertex: (100, 100)
+
+        assert!(gpu.command_fifo.is_empty());
+    }
+
+    #[test]
+    fn test_monochrome_rect_8x8() {
+        let mut gpu = GPU::new();
+
+        // GP0(0x70): 8×8 Rectangle Opaque
+        gpu.write_gp0(0x7000FF00); // Command + Green
+        gpu.write_gp0(0x00000000); // Vertex: (0, 0)
+
+        assert!(gpu.command_fifo.is_empty());
+    }
+
+    #[test]
+    fn test_monochrome_rect_16x16() {
+        let mut gpu = GPU::new();
+
+        // GP0(0x78): 16×16 Rectangle Opaque
+        gpu.write_gp0(0x78FFFF00); // Command + Yellow
+        gpu.write_gp0(0x00320032); // Vertex: (50, 50)
+
+        assert!(gpu.command_fifo.is_empty());
+    }
+
+    #[test]
+    fn test_monochrome_rect_semi_transparent_variants() {
+        let mut gpu = GPU::new();
+
+        // Test all semi-transparent variants
+        // GP0(0x62): Variable size, semi-transparent
+        gpu.write_gp0(0x62FFFFFF);
+        gpu.write_gp0(0x00000000);
+        gpu.write_gp0(0x00200020);
+        assert!(gpu.command_fifo.is_empty());
+
+        // GP0(0x6A): 1×1, semi-transparent
+        gpu.write_gp0(0x6AFFFFFF);
+        gpu.write_gp0(0x00000000);
+        assert!(gpu.command_fifo.is_empty());
+
+        // GP0(0x72): 8×8, semi-transparent
+        gpu.write_gp0(0x72FFFFFF);
+        gpu.write_gp0(0x00000000);
+        assert!(gpu.command_fifo.is_empty());
+
+        // GP0(0x7A): 16×16, semi-transparent
+        gpu.write_gp0(0x7AFFFFFF);
+        gpu.write_gp0(0x00000000);
+        assert!(gpu.command_fifo.is_empty());
+    }
+
+    // Textured Rectangle Tests
+
+    #[test]
+    fn test_textured_rect_variable_opaque() {
+        let mut gpu = GPU::new();
+
+        // GP0(0x64): Textured Rectangle Variable Size Opaque (Raw)
+        gpu.write_gp0(0x64808080); // Command + Color
+        gpu.write_gp0(0x00000000); // Vertex: (0, 0)
+        gpu.write_gp0(0x00000000); // TexCoord + CLUT
+        gpu.write_gp0(0x00400040); // Size: 64×64
+
+        assert!(gpu.command_fifo.is_empty());
+    }
+
+    #[test]
+    fn test_textured_rect_variable_modulated() {
+        let mut gpu = GPU::new();
+
+        // GP0(0x65): Textured Rectangle Variable Size Opaque (Modulated)
+        gpu.write_gp0(0x65808080); // Command + Color (modulation)
+        gpu.write_gp0(0x00320032); // Vertex: (50, 50)
+        gpu.write_gp0(0x00200020); // TexCoord: U=32, V=32
+        gpu.write_gp0(0x00400040); // Size: 64×64
+
+        assert!(gpu.command_fifo.is_empty());
+    }
+
+    #[test]
+    fn test_textured_rect_1x1_variants() {
+        let mut gpu = GPU::new();
+
+        // GP0(0x6C): 1×1 Opaque Raw
+        gpu.write_gp0(0x6C808080);
+        gpu.write_gp0(0x00000000);
+        gpu.write_gp0(0x00000000);
+        assert!(gpu.command_fifo.is_empty());
+
+        // GP0(0x6D): 1×1 Opaque Modulated
+        gpu.write_gp0(0x6D808080);
+        gpu.write_gp0(0x00000000);
+        gpu.write_gp0(0x00000000);
+        assert!(gpu.command_fifo.is_empty());
+
+        // GP0(0x6E): 1×1 Semi-Transparent Raw
+        gpu.write_gp0(0x6E808080);
+        gpu.write_gp0(0x00000000);
+        gpu.write_gp0(0x00000000);
+        assert!(gpu.command_fifo.is_empty());
+
+        // GP0(0x6F): 1×1 Semi-Transparent Modulated
+        gpu.write_gp0(0x6F808080);
+        gpu.write_gp0(0x00000000);
+        gpu.write_gp0(0x00000000);
+        assert!(gpu.command_fifo.is_empty());
+    }
+
+    #[test]
+    fn test_textured_rect_8x8_variants() {
+        let mut gpu = GPU::new();
+
+        // GP0(0x74): 8×8 Opaque Raw
+        gpu.write_gp0(0x74808080);
+        gpu.write_gp0(0x00000000);
+        gpu.write_gp0(0x00000000);
+        assert!(gpu.command_fifo.is_empty());
+
+        // GP0(0x75): 8×8 Opaque Modulated
+        gpu.write_gp0(0x75808080);
+        gpu.write_gp0(0x00000000);
+        gpu.write_gp0(0x00000000);
+        assert!(gpu.command_fifo.is_empty());
+
+        // GP0(0x76): 8×8 Semi-Transparent Raw
+        gpu.write_gp0(0x76808080);
+        gpu.write_gp0(0x00000000);
+        gpu.write_gp0(0x00000000);
+        assert!(gpu.command_fifo.is_empty());
+
+        // GP0(0x77): 8×8 Semi-Transparent Modulated
+        gpu.write_gp0(0x77808080);
+        gpu.write_gp0(0x00000000);
+        gpu.write_gp0(0x00000000);
+        assert!(gpu.command_fifo.is_empty());
+    }
+
+    #[test]
+    fn test_textured_rect_16x16_variants() {
+        let mut gpu = GPU::new();
+
+        // Test all 16×16 variants
+        let variants = [0x7C, 0x7D, 0x7E, 0x7F];
+
+        for cmd in variants {
+            gpu.write_gp0((cmd << 24) | 0x808080);
+            gpu.write_gp0(0x00000000);
+            gpu.write_gp0(0x00000000);
+            assert!(gpu.command_fifo.is_empty());
+        }
+    }
+
+    #[test]
+    fn test_rect_clut_extraction() {
+        let mut gpu = GPU::new();
+
+        // Test CLUT coordinate extraction
+        // CLUT at X=320 (320/16 = 20), Y=100
+        let clut_x = 20u32; // X / 16
+        let clut_y = 100u32;
+        let texcoord_clut = (clut_y << 22) | (clut_x << 16);
+
+        gpu.write_gp0(0x64808080); // Command
+        gpu.write_gp0(0x00000000); // Vertex
+        gpu.write_gp0(texcoord_clut); // CLUT + TexCoord
+        gpu.write_gp0(0x00400040); // Size
+
+        assert!(gpu.command_fifo.is_empty());
+        // Actual CLUT values validated in rendering
+    }
+
+    #[test]
+    fn test_rect_texture_page_usage() {
+        let mut gpu = GPU::new();
+
+        // Rectangle commands use texture page from draw mode (GP0(E1h))
+        // Not from command like polygons
+        // Set texture page first
+        gpu.write_gp0(0xE1000012); // Page X=128, Y=256
+
+        // Then draw textured rectangle
+        gpu.write_gp0(0x64808080);
+        gpu.write_gp0(0x00000000);
+        gpu.write_gp0(0x00000000);
+        gpu.write_gp0(0x00400040);
+
+        assert!(gpu.command_fifo.is_empty());
+        assert_eq!(gpu.draw_mode.texture_page_x_base, 128);
+        assert_eq!(gpu.draw_mode.texture_page_y_base, 256);
+    }
+
+    #[test]
+    fn test_rect_size_limits() {
+        let mut gpu = GPU::new();
+
+        // Per PSX-SPX: maximum dimensions 1023×511
+        gpu.write_gp0(0x60FFFFFF);
+        gpu.write_gp0(0x00000000);
+        gpu.write_gp0(0x01FF03FF); // Width=1023, Height=511
+
+        assert!(gpu.command_fifo.is_empty());
+    }
+
+    #[test]
+    fn test_rect_coordinate_format() {
+        let mut gpu = GPU::new();
+
+        // Test vertex coordinate format: YYYYXXXX
+        // X=200 (0xC8), Y=150 (0x96)
+        gpu.write_gp0(0x60FFFFFF);
+        gpu.write_gp0(0x009600C8); // Y=150, X=200
+        gpu.write_gp0(0x00320032); // 50×50
+
+        assert!(gpu.command_fifo.is_empty());
+    }
+
+    #[test]
+    fn test_rect_texture_uv_format() {
+        let mut gpu = GPU::new();
+
+        // UV format: VVUU (8-bit U, 8-bit V)
+        let u = 64u32;
+        let v = 128u32;
+        let texcoord = (v << 8) | u;
+
+        gpu.write_gp0(0x64808080);
+        gpu.write_gp0(0x00000000);
+        gpu.write_gp0(texcoord);
+        gpu.write_gp0(0x00400040);
+
+        assert!(gpu.command_fifo.is_empty());
+    }
+
+    #[test]
+    fn test_rect_modulation_vs_raw() {
+        let mut gpu = GPU::new();
+
+        // Raw texture (bit 24 = 1): GP0(0x64) - color ignored
+        gpu.write_gp0(0x64FFFFFF);
+        gpu.write_gp0(0x00000000);
+        gpu.write_gp0(0x00000000);
+        gpu.write_gp0(0x00200020);
+        assert!(gpu.command_fifo.is_empty());
+
+        // Modulated (bit 24 = 0): GP0(0x65) - color used for modulation
+        // Per PSX-SPX: (texel.rgb * vertexColor.rgb) / 128
+        gpu.write_gp0(0x65808080); // 128,128,128 = brightest for modulation
+        gpu.write_gp0(0x00000000);
+        gpu.write_gp0(0x00000000);
+        gpu.write_gp0(0x00200020);
+        assert!(gpu.command_fifo.is_empty());
+    }
+
+    #[test]
+    fn test_rect_partial_command_buffering() {
+        let mut gpu = GPU::new();
+
+        // Variable size rectangle needs 3 words
+        gpu.write_gp0(0x60FFFFFF);
+        assert_eq!(gpu.command_fifo.len(), 1);
+
+        gpu.write_gp0(0x00000000);
+        assert_eq!(gpu.command_fifo.len(), 2);
+
+        gpu.write_gp0(0x00640064);
+        assert!(gpu.command_fifo.is_empty());
+    }
+
+    #[test]
+    fn test_textured_rect_needs_4_words() {
+        let mut gpu = GPU::new();
+
+        // Textured variable rectangle needs 4 words
+        gpu.write_gp0(0x64808080);
+        assert_eq!(gpu.command_fifo.len(), 1);
+
+        gpu.write_gp0(0x00000000);
+        assert_eq!(gpu.command_fifo.len(), 2);
+
+        gpu.write_gp0(0x00000000);
+        assert_eq!(gpu.command_fifo.len(), 3);
+
+        gpu.write_gp0(0x00400040);
+        assert!(gpu.command_fifo.is_empty());
+    }
+
+    #[test]
+    fn test_fixed_size_rect_2_vs_3_words() {
+        let mut gpu = GPU::new();
+
+        // Monochrome 8×8 needs only 2 words (no size word)
+        gpu.write_gp0(0x70FFFFFF);
+        gpu.write_gp0(0x00000000);
+        assert!(gpu.command_fifo.is_empty());
+
+        // Textured 8×8 needs 3 words (includes UV+CLUT)
+        gpu.write_gp0(0x74808080);
+        gpu.write_gp0(0x00000000);
+        gpu.write_gp0(0x00000000);
+        assert!(gpu.command_fifo.is_empty());
+    }
+
+    #[test]
+    fn test_rect_size_encoding() {
+        let mut gpu = GPU::new();
+
+        // Size word format: HhhhWwww (Height in upper 16, Width in lower 16)
+        // Width=256 (0x100), Height=128 (0x80)
+        gpu.write_gp0(0x60FFFFFF);
+        gpu.write_gp0(0x00000000);
+        gpu.write_gp0(0x00800100); // Height=128, Width=256
+
+        assert!(gpu.command_fifo.is_empty());
+    }
+}

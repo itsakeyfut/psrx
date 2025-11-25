@@ -334,3 +334,420 @@ impl Voice {
         }
     }
 }
+
+#[cfg(test)]
+#[allow(clippy::field_reassign_with_default)]
+mod tests {
+    use super::*;
+    use crate::core::spu::noise::NoiseGenerator;
+
+    #[test]
+    fn test_voice_creation() {
+        let voice = Voice::new(5);
+        assert_eq!(voice.id, 5);
+        assert!(!voice.enabled);
+        assert_eq!(voice.volume_left, 0);
+        assert_eq!(voice.volume_right, 0);
+        assert_eq!(voice.sample_rate, 0);
+        assert_eq!(voice.current_address, 0);
+    }
+
+    #[test]
+    fn test_voice_key_on() {
+        let mut voice = Voice::new(0);
+        voice.start_address = 0x100;
+
+        voice.key_on();
+
+        assert!(voice.enabled);
+        assert_eq!(voice.current_address, 0x100 * 8);
+        assert_eq!(voice.adsr.phase, ADSRPhase::Attack);
+        assert_eq!(voice.adsr.level, 0);
+        assert!(!voice.loop_flag);
+        assert!(!voice.final_block);
+    }
+
+    #[test]
+    fn test_voice_key_off() {
+        let mut voice = Voice::new(0);
+        voice.enabled = true;
+        voice.adsr.phase = ADSRPhase::Sustain;
+        voice.adsr.level = 10000;
+
+        voice.key_off();
+
+        assert_eq!(voice.adsr.phase, ADSRPhase::Release);
+        assert_eq!(voice.adsr.level, 10000); // Level preserved
+    }
+
+    #[test]
+    fn test_voice_render_disabled() {
+        let mut voice = Voice::new(0);
+        voice.enabled = false;
+
+        let spu_ram = vec![0u8; 512 * 1024];
+        let mut noise = NoiseGenerator::new();
+
+        let (left, right) = voice.render_sample(&spu_ram, &mut noise);
+
+        assert_eq!(left, 0);
+        assert_eq!(right, 0);
+    }
+
+    #[test]
+    fn test_voice_render_noise_mode() {
+        let mut voice = Voice::new(0);
+        voice.enabled = true;
+        voice.noise_enabled = true;
+        voice.adsr.phase = ADSRPhase::Sustain;
+        voice.adsr.level = 32767;
+        voice.volume_left = 0x4000;
+        voice.volume_right = 0x4000;
+
+        let spu_ram = vec![0u8; 512 * 1024];
+        let mut noise = NoiseGenerator::new();
+        noise.set_frequency(0, 1);
+
+        let (_left, _right) = voice.render_sample(&spu_ram, &mut noise);
+
+        // Noise mode should produce output
+        // Output depends on noise state and is always valid i16
+        // Just verify it doesn't crash
+    }
+
+    #[test]
+    fn test_voice_decode_block_basic() {
+        let mut voice = Voice::new(0);
+        let mut spu_ram = vec![0u8; 512 * 1024];
+
+        // Create a simple ADPCM block
+        let block_addr: usize = 0x1000;
+        voice.current_address = block_addr as u32;
+
+        // Block header: shift=0, filter=0
+        spu_ram[block_addr] = 0x00;
+        spu_ram[block_addr + 1] = 0x00; // No loop flags
+
+        // Fill with simple pattern
+        for i in 2..16 {
+            spu_ram[block_addr + i] = 0x11;
+        }
+
+        voice.decode_block(&spu_ram);
+
+        // Should have 28 decoded samples
+        assert_eq!(voice.decoded_samples.len(), 28);
+        assert_eq!(voice.adpcm_state.position, 0.0);
+    }
+
+    #[test]
+    fn test_voice_decode_block_loop_repeat() {
+        let mut voice = Voice::new(0);
+        let mut spu_ram = vec![0u8; 512 * 1024];
+
+        voice.current_address = 0x1000;
+        voice.repeat_address = 0x200;
+
+        // Block with loop end and repeat flags
+        spu_ram[0x1000] = 0x00;
+        spu_ram[0x1001] = 0x03; // Loop end | Loop repeat
+
+        for i in 2..16 {
+            spu_ram[0x1000 + i] = 0x22;
+        }
+
+        voice.decode_block(&spu_ram);
+
+        // Should set loop flag and jump to repeat address
+        assert!(voice.loop_flag);
+        assert_eq!(voice.current_address, 0x200 * 8);
+    }
+
+    #[test]
+    fn test_voice_decode_block_final() {
+        let mut voice = Voice::new(0);
+        let mut spu_ram = vec![0u8; 512 * 1024];
+
+        voice.current_address = 0x1000;
+
+        // Block with loop end but no repeat (final block)
+        spu_ram[0x1000] = 0x00;
+        spu_ram[0x1001] = 0x01; // Loop end only
+
+        for i in 2..16 {
+            spu_ram[0x1000 + i] = 0x33;
+        }
+
+        voice.decode_block(&spu_ram);
+
+        // Should mark as final block
+        assert!(voice.final_block);
+        assert_eq!(voice.decoded_samples.len(), 28);
+    }
+
+    #[test]
+    fn test_voice_decode_out_of_bounds() {
+        let mut voice = Voice::new(0);
+        let spu_ram = vec![0u8; 512 * 1024];
+
+        // Set address beyond RAM
+        voice.current_address = 512 * 1024 - 8;
+
+        voice.decode_block(&spu_ram);
+
+        // Should handle gracefully
+        assert!(voice.decoded_samples.is_empty());
+        assert!(!voice.enabled);
+        assert_eq!(voice.adsr.phase, ADSRPhase::Off);
+    }
+
+    #[test]
+    fn test_voice_interpolate_sample() {
+        let mut voice = Voice::new(0);
+        voice.decoded_samples = vec![100, 200, 300, 400];
+        voice.adpcm_state.position = 1.5;
+
+        let sample = voice.interpolate_sample();
+
+        // Should interpolate between samples[1] and samples[2]
+        // Expected: 200 + (300 - 200) * 0.5 = 250
+        assert_eq!(sample, 250);
+    }
+
+    #[test]
+    fn test_voice_interpolate_at_boundary() {
+        let mut voice = Voice::new(0);
+        voice.decoded_samples = vec![100, 200, 300];
+        voice.adpcm_state.position = 0.0;
+
+        let sample = voice.interpolate_sample();
+
+        // At position 0.0, should return first sample
+        assert_eq!(sample, 100);
+    }
+
+    #[test]
+    fn test_voice_interpolate_empty() {
+        let voice = Voice::new(0);
+
+        let sample = voice.interpolate_sample();
+
+        // Empty samples should return 0
+        assert_eq!(sample, 0);
+    }
+
+    #[test]
+    fn test_voice_advance_position() {
+        let mut voice = Voice::new(0);
+        voice.sample_rate = 4096; // 1.0 in 4.12 fixed point
+        voice.adpcm_state.position = 10.0;
+        voice.decoded_samples = vec![0i16; 28];
+
+        voice.advance_position();
+
+        // Position should advance by 1.0
+        assert_eq!(voice.adpcm_state.position, 11.0);
+    }
+
+    #[test]
+    fn test_voice_advance_position_block_transition() {
+        let mut voice = Voice::new(0);
+        voice.sample_rate = 4096;
+        voice.adpcm_state.position = 27.5;
+        voice.current_address = 0x1000;
+        voice.decoded_samples = vec![0i16; 28];
+        voice.loop_flag = false;
+
+        voice.advance_position();
+
+        // Should advance past block boundary
+        assert!(voice.adpcm_state.position >= 28.0);
+        // Current address should advance by 16 bytes
+        assert_eq!(voice.current_address, 0x1000 + 16);
+    }
+
+    #[test]
+    fn test_voice_advance_position_final_block() {
+        let mut voice = Voice::new(0);
+        voice.enabled = true;
+        voice.sample_rate = 4096;
+        voice.adpcm_state.position = 27.5;
+        voice.final_block = true;
+        voice.decoded_samples = vec![0i16; 28];
+
+        voice.advance_position();
+
+        // Should disable voice on final block completion
+        assert!(!voice.enabled);
+        assert_eq!(voice.adsr.phase, ADSRPhase::Off);
+    }
+
+    #[test]
+    fn test_voice_volume_application() {
+        let mut voice = Voice::new(0);
+        voice.enabled = true;
+        voice.noise_enabled = false;
+        voice.volume_left = 0x4000; // 0.5 in fixed-point
+        voice.volume_right = 0x2000; // 0.25 in fixed-point
+        voice.adsr.phase = ADSRPhase::Sustain;
+        voice.adsr.level = 32767;
+        voice.sample_rate = 4096;
+
+        // Setup decoded samples
+        voice.decoded_samples = vec![10000i16; 28];
+        voice.adpcm_state.position = 0.0;
+
+        let spu_ram = vec![0u8; 512 * 1024];
+        let mut noise = NoiseGenerator::new();
+
+        let (left, right) = voice.render_sample(&spu_ram, &mut noise);
+
+        // Left should be roughly half of right (due to volume difference)
+        assert!(left.abs() > right.abs());
+    }
+
+    #[test]
+    fn test_voice_adsr_envelope_application() {
+        let mut voice = Voice::new(0);
+        voice.enabled = true;
+        voice.volume_left = 0x7FFF;
+        voice.volume_right = 0x7FFF;
+        voice.adsr.phase = ADSRPhase::Sustain;
+        voice.adsr.level = 16383; // Half of max
+        voice.sample_rate = 4096;
+
+        voice.decoded_samples = vec![10000i16; 28];
+        voice.adpcm_state.position = 0.0;
+
+        let spu_ram = vec![0u8; 512 * 1024];
+        let mut noise = NoiseGenerator::new();
+
+        let (left, _right) = voice.render_sample(&spu_ram, &mut noise);
+
+        // Output should be scaled by ADSR level
+        // Expected: roughly 10000 * (16383 / 32767) ≈ 5000
+        assert!(left.abs() < 10000); // Should be less than full amplitude
+    }
+
+    #[test]
+    fn test_voice_multiple_voices_independent() {
+        let mut voice1 = Voice::new(0);
+        let mut voice2 = Voice::new(1);
+
+        voice1.volume_left = 0x4000;
+        voice2.volume_left = 0x2000;
+
+        voice1.start_address = 0x100;
+        voice2.start_address = 0x200;
+
+        voice1.key_on();
+        voice2.key_on();
+
+        // Voices should be independent
+        assert_eq!(voice1.current_address, 0x100 * 8);
+        assert_eq!(voice2.current_address, 0x200 * 8);
+        assert_ne!(voice1.volume_left, voice2.volume_left);
+    }
+
+    #[test]
+    fn test_voice_sample_rate_range() {
+        let mut voice = Voice::new(0);
+        voice.decoded_samples = vec![100i16; 28];
+        voice.adpcm_state.position = 0.0;
+
+        // Test various sample rates
+        let rates = [0u16, 4096, 8192, 16384, 65535];
+
+        for rate in &rates {
+            voice.sample_rate = *rate;
+            let initial_pos = voice.adpcm_state.position;
+
+            voice.advance_position();
+
+            if *rate == 0 {
+                // Zero rate should not advance
+                assert_eq!(voice.adpcm_state.position, initial_pos);
+            } else {
+                // Non-zero rate should advance
+                assert!(voice.adpcm_state.position > initial_pos);
+            }
+
+            voice.adpcm_state.position = 0.0; // Reset for next test
+        }
+    }
+
+    #[test]
+    fn test_voice_loop_address_handling() {
+        let mut voice = Voice::new(0);
+        voice.start_address = 0x100;
+        voice.repeat_address = 0x200;
+
+        voice.key_on();
+        assert_eq!(voice.current_address, 0x100 * 8);
+
+        // Simulate reaching loop point
+        let mut spu_ram = vec![0u8; 512 * 1024];
+        spu_ram[0x100 * 8] = 0x00;
+        spu_ram[0x100 * 8 + 1] = 0x03; // Loop end | Loop repeat
+
+        voice.decode_block(&spu_ram);
+
+        // Should jump to repeat address
+        assert_eq!(voice.current_address, 0x200 * 8);
+    }
+
+    #[test]
+    fn test_voice_adsr_off_stops_output() {
+        let mut voice = Voice::new(0);
+        voice.enabled = true;
+        voice.adsr.phase = ADSRPhase::Off;
+        voice.volume_left = 0x7FFF;
+        voice.volume_right = 0x7FFF;
+        voice.decoded_samples = vec![10000i16; 28];
+
+        let spu_ram = vec![0u8; 512 * 1024];
+        let mut noise = NoiseGenerator::new();
+
+        let (left, right) = voice.render_sample(&spu_ram, &mut noise);
+
+        // ADSR Off should produce silence
+        assert_eq!(left, 0);
+        assert_eq!(right, 0);
+    }
+
+    #[test]
+    fn test_voice_needs_decode() {
+        let mut voice = Voice::new(0);
+
+        // Empty samples should need decode
+        assert!(voice.needs_decode());
+
+        // Position past block should need decode
+        voice.decoded_samples = vec![0i16; 28];
+        voice.adpcm_state.position = 28.0;
+        assert!(voice.needs_decode());
+
+        // Valid position should not need decode
+        voice.adpcm_state.position = 10.0;
+        assert!(!voice.needs_decode());
+    }
+
+    #[test]
+    fn test_voice_key_on_resets_state() {
+        let mut voice = Voice::new(0);
+        voice.start_address = 0x100;
+        voice.adpcm_state.prev_samples = [100, 200];
+        voice.decoded_samples = vec![1, 2, 3];
+        voice.loop_flag = true;
+        voice.final_block = true;
+
+        voice.key_on();
+
+        // Key on should reset all state
+        assert_eq!(voice.adpcm_state.prev_samples, [0, 0]);
+        assert!(voice.decoded_samples.is_empty());
+        assert!(!voice.loop_flag);
+        assert!(!voice.final_block);
+        assert_eq!(voice.adsr.phase, ADSRPhase::Attack);
+    }
+}

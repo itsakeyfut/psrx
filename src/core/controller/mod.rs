@@ -327,6 +327,3 @@ impl Default for Controller {
         Self::new()
     }
 }
-
-#[cfg(test)]
-mod tests;

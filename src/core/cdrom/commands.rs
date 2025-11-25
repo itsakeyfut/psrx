@@ -709,3 +709,531 @@ impl CDROM {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::core::cdrom::{DiscImage, CDROM};
+
+    /// Helper to convert decimal to BCD
+    fn dec_to_bcd(decimal: u8) -> u8 {
+        ((decimal / 10) << 4) | (decimal % 10)
+    }
+
+    #[test]
+    fn test_cmd_getstat_returns_status() {
+        let mut cdrom = CDROM::new();
+
+        cdrom.cmd_getstat();
+
+        // Should have one response byte
+        assert_eq!(cdrom.response_fifo.len(), 1);
+        // Should have triggered INT3 (bit 2 set = value 4)
+        assert_eq!(cdrom.interrupt_flag(), 4);
+    }
+
+    #[test]
+    fn test_cmd_setloc_with_valid_parameters() {
+        let mut cdrom = CDROM::new();
+
+        // Set parameters: MM=00, SS=02, FF=00 (BCD format)
+        cdrom.param_fifo.push_back(dec_to_bcd(0)); // minute
+        cdrom.param_fifo.push_back(dec_to_bcd(2)); // second
+        cdrom.param_fifo.push_back(dec_to_bcd(0)); // sector
+
+        cdrom.cmd_setloc();
+
+        // Should set seek_target
+        assert!(cdrom.seek_target.is_some());
+        let target = cdrom.seek_target.unwrap();
+        assert_eq!(target.minute, 0);
+        assert_eq!(target.second, 2);
+        assert_eq!(target.sector, 0);
+
+        // Should have response and interrupt
+        assert_eq!(cdrom.response_fifo.len(), 1);
+        assert_eq!(cdrom.interrupt_flag(), 4); // INT3 = bit 2 = value 4
+
+        // Parameters should be consumed
+        assert!(cdrom.param_fifo.is_empty());
+    }
+
+    #[test]
+    fn test_cmd_setloc_with_insufficient_parameters() {
+        let mut cdrom = CDROM::new();
+
+        // Only 2 parameters instead of 3
+        cdrom.param_fifo.push_back(0x00);
+        cdrom.param_fifo.push_back(0x02);
+
+        cdrom.cmd_setloc();
+
+        // Should trigger error response
+        assert!(!cdrom.response_fifo.is_empty());
+    }
+
+    #[test]
+    fn test_cmd_setloc_with_no_parameters() {
+        let mut cdrom = CDROM::new();
+
+        cdrom.cmd_setloc();
+
+        // Should trigger error response
+        assert!(!cdrom.response_fifo.is_empty());
+    }
+
+    #[test]
+    fn test_cmd_setloc_bcd_conversion() {
+        let mut cdrom = CDROM::new();
+
+        // Test BCD values: MM=12, SS=34, FF=56
+        cdrom.param_fifo.push_back(0x12); // 12 in BCD = 12 decimal
+        cdrom.param_fifo.push_back(0x34); // 34 in BCD = 34 decimal
+        cdrom.param_fifo.push_back(0x56); // 56 in BCD = 56 decimal
+
+        cdrom.cmd_setloc();
+
+        let target = cdrom.seek_target.unwrap();
+        assert_eq!(target.minute, 12);
+        assert_eq!(target.second, 34);
+        assert_eq!(target.sector, 56);
+    }
+
+    #[test]
+    fn test_cmd_readn_sets_reading_state() {
+        let mut cdrom = CDROM::new();
+
+        cdrom.cmd_readn();
+
+        // Should be in reading state
+        assert_eq!(cdrom.state, CDState::Reading);
+        assert!(cdrom.status.reading);
+
+        // Should have response and INT3
+        assert_eq!(cdrom.response_fifo.len(), 1);
+        assert_eq!(cdrom.interrupt_flag(), 4); // INT3 = bit 2 = value 4
+    }
+
+    #[test]
+    fn test_cmd_reads_sets_reading_state() {
+        let mut cdrom = CDROM::new();
+
+        cdrom.cmd_reads();
+
+        // Should be in reading state
+        assert_eq!(cdrom.state, CDState::Reading);
+        assert!(cdrom.status.reading);
+
+        // Should have response and INT3
+        assert_eq!(cdrom.response_fifo.len(), 1);
+        assert_eq!(cdrom.interrupt_flag(), 4); // INT3 = bit 2 = value 4
+    }
+
+    #[test]
+    fn test_cmd_pause_stops_reading() {
+        let mut cdrom = CDROM::new();
+
+        // Start reading first
+        cdrom.state = CDState::Reading;
+        cdrom.status.reading = true;
+
+        cdrom.cmd_pause();
+
+        // Should stop reading
+        assert_eq!(cdrom.state, CDState::Idle);
+        assert!(!cdrom.status.reading);
+
+        // Should have two responses (first and second)
+        assert_eq!(cdrom.response_fifo.len(), 2);
+
+        // Should trigger INT3 and INT2
+        // Note: The implementation triggers both immediately
+    }
+
+    #[test]
+    fn test_cmd_pause_stops_audio() {
+        let mut cdrom = CDROM::new();
+
+        // Start audio playback
+        cdrom.status.playing = true;
+
+        cdrom.cmd_pause();
+
+        // Should stop playback
+        assert!(!cdrom.status.playing);
+    }
+
+    #[test]
+    fn test_cmd_init_resets_state() {
+        let mut cdrom = CDROM::new();
+
+        // Set some state
+        cdrom.status.reading = true;
+        cdrom.status.seeking = true;
+        cdrom.status.playing = true;
+
+        cdrom.cmd_init();
+
+        // Should reset state
+        assert!(cdrom.status.motor_on);
+        assert_eq!(cdrom.state, CDState::Idle);
+        assert!(!cdrom.status.reading);
+        assert!(!cdrom.status.seeking);
+        assert!(!cdrom.status.playing);
+
+        // Should have two responses
+        assert_eq!(cdrom.response_fifo.len(), 2);
+    }
+
+    #[test]
+    fn test_cmd_setmode_with_no_parameters() {
+        let mut cdrom = CDROM::new();
+
+        cdrom.cmd_setmode();
+
+        // Should trigger error response
+        assert!(!cdrom.response_fifo.is_empty());
+    }
+
+    #[test]
+    fn test_cmd_setmode_parses_mode_byte() {
+        let mut cdrom = CDROM::new();
+
+        // Set mode: bit 7 (double speed) and bit 5 (sector size 2340)
+        let mode_byte = 0b1010_0000;
+        cdrom.param_fifo.push_back(mode_byte);
+
+        cdrom.cmd_setmode();
+
+        // Check mode flags
+        assert!(cdrom.mode.double_speed);
+        assert!(cdrom.mode.size_2340);
+        assert!(!cdrom.mode.cdda_report);
+        assert!(!cdrom.mode.auto_pause);
+
+        // Should have response
+        assert_eq!(cdrom.response_fifo.len(), 1);
+        assert_eq!(cdrom.interrupt_flag(), 4); // INT3 = bit 2 = value 4
+    }
+
+    #[test]
+    fn test_cmd_setmode_all_flags() {
+        // Test each individual flag
+        let test_cases = vec![
+            (0x01, "cdda_report"),
+            (0x02, "auto_pause"),
+            (0x04, "report_all"),
+            (0x08, "xa_filter"),
+            (0x10, "ignore_bit"),
+            (0x20, "size_2340"),
+            (0x40, "xa_adpcm"),
+            (0x80, "double_speed"),
+        ];
+
+        for (mode_byte, flag_name) in test_cases {
+            let mut cdrom = CDROM::new();
+            cdrom.param_fifo.push_back(mode_byte);
+            cdrom.cmd_setmode();
+
+            // Verify the correct flag was set
+            match flag_name {
+                "cdda_report" => assert!(cdrom.mode.cdda_report),
+                "auto_pause" => assert!(cdrom.mode.auto_pause),
+                "report_all" => assert!(cdrom.mode.report_all),
+                "xa_filter" => assert!(cdrom.mode.xa_filter),
+                "ignore_bit" => assert!(cdrom.mode.ignore_bit),
+                "size_2340" => assert!(cdrom.mode.size_2340),
+                "xa_adpcm" => assert!(cdrom.mode.xa_adpcm),
+                "double_speed" => assert!(cdrom.mode.double_speed),
+                _ => panic!("Unknown flag"),
+            }
+        }
+    }
+
+    #[test]
+    fn test_cmd_seekl_with_target_set() {
+        let mut cdrom = CDROM::new();
+
+        // Set seek target first
+        cdrom.seek_target = Some(CDPosition::new(0, 10, 0));
+
+        cdrom.cmd_seekl();
+
+        // Should be in seeking state
+        assert_eq!(cdrom.state, CDState::Seeking);
+        assert!(cdrom.status.seeking);
+
+        // Should have response and INT3
+        assert_eq!(cdrom.response_fifo.len(), 1);
+        assert_eq!(cdrom.interrupt_flag(), 4); // INT3 = bit 2 = value 4
+    }
+
+    #[test]
+    fn test_cmd_seekl_without_target() {
+        let mut cdrom = CDROM::new();
+
+        cdrom.cmd_seekl();
+
+        // Should trigger error response
+        assert!(!cdrom.response_fifo.is_empty());
+    }
+
+    #[test]
+    fn test_cmd_test_subfunction_0x20_bios_version() {
+        let mut cdrom = CDROM::new();
+
+        cdrom.param_fifo.push_back(0x20);
+
+        cdrom.cmd_test();
+
+        // Should return 4 bytes: YY, MM, DD, Version
+        assert_eq!(cdrom.response_fifo.len(), 4);
+        assert_eq!(cdrom.response_fifo[0], 0x98); // Year 98
+        assert_eq!(cdrom.response_fifo[1], 0x08); // Month 08
+        assert_eq!(cdrom.response_fifo[2], 0x07); // Day 07
+        assert_eq!(cdrom.response_fifo[3], 0xC3); // Version
+
+        // Should trigger INT3
+        assert_eq!(cdrom.interrupt_flag(), 4); // INT3 = bit 2 = value 4
+    }
+
+    #[test]
+    fn test_cmd_test_subfunction_0x04_chip_id() {
+        let mut cdrom = CDROM::new();
+
+        cdrom.param_fifo.push_back(0x04);
+
+        cdrom.cmd_test();
+
+        // Should return 5 bytes: status + 4 chip ID bytes
+        assert_eq!(cdrom.response_fifo.len(), 5);
+        assert_eq!(cdrom.interrupt_flag(), 4); // INT3 = bit 2 = value 4
+    }
+
+    #[test]
+    fn test_cmd_test_unknown_subfunction() {
+        let mut cdrom = CDROM::new();
+
+        cdrom.param_fifo.push_back(0xFF);
+
+        cdrom.cmd_test();
+
+        // Should return status byte
+        assert_eq!(cdrom.response_fifo.len(), 1);
+        assert_eq!(cdrom.interrupt_flag(), 4); // INT3 = bit 2 = value 4
+    }
+
+    #[test]
+    fn test_cmd_test_without_parameters() {
+        let mut cdrom = CDROM::new();
+
+        cdrom.cmd_test();
+
+        // Should trigger error response
+        assert!(!cdrom.response_fifo.is_empty());
+    }
+
+    #[test]
+    fn test_cmd_getid_with_disc() {
+        let mut cdrom = CDROM::new();
+
+        // Load a dummy disc
+        cdrom.disc = Some(DiscImage::new_dummy());
+
+        cdrom.cmd_getid();
+
+        // Should have first response (status byte)
+        assert!(!cdrom.response_fifo.is_empty());
+
+        // Clear first response
+        cdrom.response_fifo.clear();
+        cdrom.interrupt_flag = 0;
+
+        // Note: Second response would be generated by timing system
+        // For now we just verify first response worked
+    }
+
+    #[test]
+    fn test_cmd_getid_without_disc() {
+        let mut cdrom = CDROM::new();
+
+        cdrom.cmd_getid();
+
+        // Should have response
+        assert!(!cdrom.response_fifo.is_empty());
+
+        // Should set id_error flag
+        assert!(cdrom.status.id_error);
+    }
+
+    #[test]
+    fn test_cmd_readtoc_with_disc() {
+        let mut cdrom = CDROM::new();
+
+        // Load a dummy disc
+        cdrom.disc = Some(DiscImage::new_dummy());
+
+        cdrom.cmd_readtoc();
+
+        // Should have responses
+        assert!(!cdrom.response_fifo.is_empty());
+
+        // Should trigger INT3 and INT2
+        // Note: The implementation triggers both immediately
+        assert_eq!(cdrom.response_fifo.len(), 2);
+    }
+
+    #[test]
+    fn test_cmd_readtoc_without_disc() {
+        let mut cdrom = CDROM::new();
+
+        cdrom.cmd_readtoc();
+
+        // Should have error response
+        assert!(!cdrom.response_fifo.is_empty());
+
+        // Should set id_error flag
+        assert!(cdrom.status.id_error);
+    }
+
+    #[test]
+    fn test_execute_command_unknown_command() {
+        let mut cdrom = CDROM::new();
+
+        cdrom.execute_command(0xFF);
+
+        // Should trigger error response
+        assert!(!cdrom.response_fifo.is_empty());
+    }
+
+    #[test]
+    fn test_execute_command_dispatches_correctly() {
+        let test_cases = vec![
+            (0x01, "GetStat"),
+            (0x02, "SetLoc"),
+            (0x06, "ReadN"),
+            (0x09, "Pause"),
+            (0x0A, "Init"),
+            (0x0E, "SetMode"),
+            (0x15, "SeekL"),
+            (0x19, "Test"),
+            (0x1A, "GetID"),
+            (0x1B, "ReadS"),
+            (0x1E, "ReadTOC"),
+        ];
+
+        for (cmd_byte, cmd_name) in test_cases {
+            let mut cdrom = CDROM::new();
+
+            // Provide dummy disc for commands that need it
+            if cmd_byte == 0x1E {
+                cdrom.disc = Some(DiscImage::new_dummy());
+            }
+
+            // Provide parameters for commands that need them
+            if cmd_byte == 0x02 {
+                // SetLoc needs 3 parameters
+                cdrom.param_fifo.push_back(0x00);
+                cdrom.param_fifo.push_back(0x02);
+                cdrom.param_fifo.push_back(0x00);
+            } else if cmd_byte == 0x0E {
+                // SetMode needs 1 parameter
+                cdrom.param_fifo.push_back(0x00);
+            } else if cmd_byte == 0x19 {
+                // Test needs 1 parameter
+                cdrom.param_fifo.push_back(0x20);
+            }
+
+            cdrom.execute_command(cmd_byte);
+
+            // All commands should produce some response
+            assert!(
+                !cdrom.response_fifo.is_empty(),
+                "Command {} ({}) should produce response",
+                cmd_name,
+                cmd_byte
+            );
+        }
+    }
+
+    #[test]
+    fn test_multiple_commands_preserve_order() {
+        let mut cdrom = CDROM::new();
+
+        // Execute GetStat
+        cdrom.cmd_getstat();
+        let first_response_len = cdrom.response_fifo.len();
+
+        // Clear responses
+        cdrom.response_fifo.clear();
+        cdrom.interrupt_flag = 0;
+
+        // Execute SetMode
+        cdrom.param_fifo.push_back(0x80);
+        cdrom.cmd_setmode();
+        let second_response_len = cdrom.response_fifo.len();
+
+        // Both should have produced responses
+        assert_eq!(first_response_len, 1);
+        assert_eq!(second_response_len, 1);
+    }
+
+    #[test]
+    fn test_status_byte_reflects_state() {
+        let mut cdrom = CDROM::new();
+
+        // Initial state (motor off at start)
+        let status = cdrom.get_status_byte();
+        // Motor is initially off
+        assert_eq!(status & 0x02, 0x00);
+
+        // Start reading
+        cdrom.status.reading = true;
+        let status = cdrom.get_status_byte();
+        assert_eq!(status & 0x20, 0x20); // Read bit should be set
+
+        // Start seeking
+        cdrom.status.reading = false;
+        cdrom.status.seeking = true;
+        let status = cdrom.get_status_byte();
+        assert_eq!(status & 0x40, 0x40); // Seek bit should be set
+    }
+
+    #[test]
+    fn test_bcd_to_dec_conversion() {
+        assert_eq!(bcd_to_dec(0x00), 0);
+        assert_eq!(bcd_to_dec(0x09), 9);
+        assert_eq!(bcd_to_dec(0x10), 10);
+        assert_eq!(bcd_to_dec(0x19), 19);
+        assert_eq!(bcd_to_dec(0x99), 99);
+        assert_eq!(bcd_to_dec(0x45), 45);
+    }
+
+    #[test]
+    fn test_command_consumes_parameters() {
+        let mut cdrom = CDROM::new();
+
+        // Add parameters
+        cdrom.param_fifo.push_back(0x00);
+        cdrom.param_fifo.push_back(0x02);
+        cdrom.param_fifo.push_back(0x00);
+
+        assert_eq!(cdrom.param_fifo.len(), 3);
+
+        cdrom.cmd_setloc();
+
+        // Parameters should be consumed
+        assert_eq!(cdrom.param_fifo.len(), 0);
+    }
+
+    #[test]
+    fn test_error_response_on_invalid_state() {
+        let mut cdrom = CDROM::new();
+
+        // Try to seek without setting target first
+        cdrom.cmd_seekl();
+
+        // Should generate error
+        assert!(!cdrom.response_fifo.is_empty());
+    }
+}

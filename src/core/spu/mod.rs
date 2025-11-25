@@ -53,9 +53,6 @@ mod registers;
 mod reverb;
 mod voice;
 
-#[cfg(test)]
-mod tests;
-
 use noise::NoiseGenerator;
 use registers::{SPUControl, SPUStatus, TransferMode};
 use reverb::ReverbConfig;

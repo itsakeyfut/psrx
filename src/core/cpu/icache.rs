@@ -664,4 +664,407 @@ mod tests {
         let remaining = cache.len();
         assert!(remaining < 100);
     }
+
+    // ========== Additional Edge Cases and Boundary Tests ==========
+
+    #[test]
+    fn test_cache_min_address() {
+        let mut cache = InstructionCache::new();
+
+        // Test with address 0x00000000
+        cache.store(0x00000000, 0xDEADBEEF);
+        assert_eq!(cache.fetch(0x00000000), Some(0xDEADBEEF));
+
+        cache.invalidate(0x00000000);
+        assert_eq!(cache.fetch(0x00000000), None);
+    }
+
+    #[test]
+    fn test_cache_max_address() {
+        let mut cache = InstructionCache::new();
+
+        // Test with maximum 32-bit address
+        cache.store(0xFFFFFFFC, 0xCAFEBABE);
+        assert_eq!(cache.fetch(0xFFFFFFFC), Some(0xCAFEBABE));
+
+        cache.invalidate(0xFFFFFFFC);
+        assert_eq!(cache.fetch(0xFFFFFFFC), None);
+    }
+
+    #[test]
+    fn test_cache_misaligned_addresses() {
+        let mut cache = InstructionCache::new();
+
+        // Cache should handle non-word-aligned addresses
+        // (though in real hardware, these would cause exceptions)
+        // All these addresses map to:
+        // - index = (addr >> 2) & 0x3FF = 0x20000000 & 0x3FF = 0
+        // - tag = addr >> 12 = 0x80000 (same for all three)
+        // Since they have the same index AND same tag, they map to the same cache line
+        cache.store(0x80000001, 0x11111111);
+        cache.store(0x80000002, 0x22222222);
+        cache.store(0x80000003, 0x33333333);
+
+        // Since all three have the same tag, the last stored value overwrites previous ones
+        // All three addresses will fetch the same cached data (last stored)
+        assert_eq!(cache.fetch(0x80000001), Some(0x33333333)); // Same tag, gets last stored
+        assert_eq!(cache.fetch(0x80000002), Some(0x33333333)); // Same tag, gets last stored
+        assert_eq!(cache.fetch(0x80000003), Some(0x33333333)); // Last stored
+    }
+
+    #[test]
+    fn test_cache_line_collision_pattern() {
+        let mut cache = InstructionCache::new();
+
+        // Create addresses that map to the same cache line
+        // Cache line = (addr >> 2) & 0x3FF
+        let base_addr = 0x80000000;
+        let collision_addr = base_addr + (0x400 << 2); // +1024 cache lines (wraps around)
+
+        cache.store(base_addr, 0xAAAAAAAA);
+        assert_eq!(cache.fetch(base_addr), Some(0xAAAAAAAA));
+
+        // Store to colliding address should evict previous entry
+        cache.store(collision_addr, 0xBBBBBBBB);
+        assert_eq!(cache.fetch(base_addr), None);
+        assert_eq!(cache.fetch(collision_addr), Some(0xBBBBBBBB));
+    }
+
+    #[test]
+    fn test_cache_fill_and_evict_pattern() {
+        let mut cache = InstructionCache::new();
+
+        // Fill one cache line multiple times with different tags
+        let index_addr = 0x80000100; // Fixed index
+        for i in 0..10 {
+            let addr = index_addr + (i * 0x1000); // Different tags, same index
+            cache.store(addr, i);
+
+            // Only the last stored value should be accessible
+            assert_eq!(cache.fetch(addr), Some(i));
+
+            // Previous values should be evicted
+            if i > 0 {
+                let prev_addr = index_addr + ((i - 1) * 0x1000);
+                assert_eq!(cache.fetch(prev_addr), None);
+            }
+        }
+    }
+
+    #[test]
+    fn test_invalidate_range_boundaries() {
+        let mut cache = InstructionCache::new();
+
+        // Store instructions at boundaries
+        cache.store(0x80000000, 0x00000001);
+        cache.store(0x80000004, 0x00000002);
+        cache.store(0x80000008, 0x00000003);
+        cache.store(0x8000000C, 0x00000004);
+
+        // Invalidate middle range
+        cache.invalidate_range(0x80000004, 0x80000008);
+
+        // First and last should remain valid
+        assert_eq!(cache.fetch(0x80000000), Some(0x00000001));
+        assert_eq!(cache.fetch(0x8000000C), Some(0x00000004));
+
+        // Middle should be invalidated
+        assert_eq!(cache.fetch(0x80000004), None);
+        assert_eq!(cache.fetch(0x80000008), None);
+    }
+
+    #[test]
+    fn test_invalidate_range_reversed() {
+        let mut cache = InstructionCache::new();
+
+        // Store some instructions
+        for i in 0..10 {
+            cache.store(0x80000000 + i * 4, i);
+        }
+
+        let len_before = cache.len();
+
+        // Invalid range (start > end) should do nothing
+        cache.invalidate_range(0x80000020, 0x80000010);
+
+        assert_eq!(cache.len(), len_before);
+    }
+
+    #[test]
+    fn test_invalidate_range_single_address() {
+        let mut cache = InstructionCache::new();
+
+        cache.store(0x80000100, 0xABCDEF00);
+        cache.store(0x80000104, 0x12345678);
+
+        // Invalidate single address (start == end)
+        cache.invalidate_range(0x80000100, 0x80000100);
+
+        assert_eq!(cache.fetch(0x80000100), None);
+        assert_eq!(cache.fetch(0x80000104), Some(0x12345678));
+    }
+
+    #[test]
+    fn test_invalidate_range_misaligned() {
+        let mut cache = InstructionCache::new();
+
+        // Store word-aligned instructions
+        cache.store(0x80000000, 0x11111111);
+        cache.store(0x80000004, 0x22222222);
+        cache.store(0x80000008, 0x33333333);
+
+        // Invalidate with misaligned boundaries
+        // Should still invalidate the affected word-aligned addresses
+        cache.invalidate_range(0x80000001, 0x80000007);
+
+        // All should be invalidated due to alignment
+        assert_eq!(cache.fetch(0x80000000), None);
+        assert_eq!(cache.fetch(0x80000004), None);
+        assert_eq!(cache.fetch(0x80000008), Some(0x33333333));
+    }
+
+    #[test]
+    fn test_cache_refill_after_invalidation() {
+        let mut cache = InstructionCache::new();
+
+        let addr = 0x80000200;
+        let first_data = 0xDEADBEEF;
+        let second_data = 0xCAFEBABE;
+
+        // Store, invalidate, store again
+        cache.store(addr, first_data);
+        assert_eq!(cache.fetch(addr), Some(first_data));
+
+        cache.invalidate(addr);
+        assert_eq!(cache.fetch(addr), None);
+
+        cache.store(addr, second_data);
+        assert_eq!(cache.fetch(addr), Some(second_data));
+    }
+
+    #[test]
+    fn test_cache_multiple_regions() {
+        let mut cache = InstructionCache::new();
+
+        // Test caching instructions from different memory regions
+        // Note: All these addresses map to index 0, so they collide
+        let regions = [
+            0x00000000, // RAM (user space) - index 0, tag 0x00000
+            0x80000000, // RAM (kernel cached) - index 0, tag 0x80000
+            0xA0000000, // RAM (kernel uncached) - index 0, tag 0xA0000
+            0xBFC00000, // BIOS ROM - index 0, tag 0xBFC00
+        ];
+
+        for (i, &addr) in regions.iter().enumerate() {
+            cache.store(addr, i as u32);
+        }
+
+        // Only the last entry should be in cache (others evicted by collision)
+        assert_eq!(cache.len(), 1);
+        assert_eq!(cache.fetch(0xBFC00000), Some(3)); // Last stored
+    }
+
+    #[test]
+    fn test_cache_wraparound_index() {
+        let mut cache = InstructionCache::new();
+
+        // Test addresses that wrap around in the 10-bit index
+        // Max index is 1023, so index 0 and 1024 should collide
+        let addr1 = 0x00000000; // Index 0
+        let addr2 = 0x00001000; // Index 1024 % 1024 = 0 (same index, different tag)
+
+        cache.store(addr1, 0xAAAAAAAA);
+        assert_eq!(cache.fetch(addr1), Some(0xAAAAAAAA));
+
+        // Should evict first entry
+        cache.store(addr2, 0xBBBBBBBB);
+        assert_eq!(cache.fetch(addr1), None);
+        assert_eq!(cache.fetch(addr2), Some(0xBBBBBBBB));
+    }
+
+    #[test]
+    fn test_cache_occupancy_calculation() {
+        let mut cache = InstructionCache::new();
+
+        // Empty cache
+        assert_eq!(cache.occupancy(), 0.0);
+
+        // Fill 25% of cache (256 entries)
+        for i in 0..256 {
+            cache.store(0x80000000 + i * 4, i);
+        }
+        let occ = cache.occupancy();
+        assert!((24.0..=26.0).contains(&occ), "Occupancy should be ~25%");
+
+        // Fill 100% of cache (1024 entries)
+        for i in 0..1024 {
+            cache.store(0x80000000 + i * 4, i);
+        }
+        let occ = cache.occupancy();
+        assert!((99.0..=100.0).contains(&occ), "Occupancy should be ~100%");
+    }
+
+    #[test]
+    fn test_cache_clear_vs_individual_invalidate() {
+        let mut cache = InstructionCache::new();
+
+        // Fill cache
+        for i in 0..50 {
+            cache.store(0x80000000 + i * 4, i);
+        }
+
+        assert_eq!(cache.len(), 50);
+
+        // Clear all at once
+        cache.clear();
+
+        assert_eq!(cache.len(), 0);
+        assert!(cache.is_empty());
+
+        // Verify all entries are invalid
+        for i in 0..50 {
+            assert_eq!(cache.fetch(0x80000000 + i * 4), None);
+        }
+    }
+
+    #[test]
+    fn test_cache_tag_comparison() {
+        let mut cache = InstructionCache::new();
+
+        // Addresses with same index but different tags
+        let addr1 = 0x00000100; // Tag = 0x00000, Index = 64
+        let addr2 = 0x10000100; // Tag = 0x10000, Index = 64
+        let addr3 = 0x20000100; // Tag = 0x20000, Index = 64
+
+        cache.store(addr1, 0x11111111);
+        assert_eq!(cache.fetch(addr1), Some(0x11111111));
+
+        cache.store(addr2, 0x22222222);
+        assert_eq!(cache.fetch(addr1), None); // Evicted
+        assert_eq!(cache.fetch(addr2), Some(0x22222222));
+
+        cache.store(addr3, 0x33333333);
+        assert_eq!(cache.fetch(addr2), None); // Evicted
+        assert_eq!(cache.fetch(addr3), Some(0x33333333));
+    }
+
+    #[test]
+    fn test_cache_default_trait() {
+        let cache: InstructionCache = Default::default();
+        assert!(cache.is_empty());
+        assert_eq!(cache.len(), 0);
+    }
+
+    #[test]
+    fn test_cache_invalidate_nonexistent() {
+        let mut cache = InstructionCache::new();
+
+        // Invalidating non-existent entry should not panic
+        cache.invalidate(0x12345678);
+
+        // Cache should still be empty
+        assert!(cache.is_empty());
+    }
+
+    #[test]
+    fn test_cache_stress_sequential_access() {
+        let mut cache = InstructionCache::new();
+
+        // Simulate sequential code execution (common pattern)
+        let start_addr = 0xBFC00000;
+        let num_instructions = 2048; // More than cache size
+
+        for i in 0..num_instructions {
+            let addr = start_addr + i * 4;
+            cache.store(addr, i);
+        }
+
+        // Cache should be full (1024 entries)
+        assert_eq!(cache.len(), 1024);
+
+        // Only the last 1024 instructions should be cached
+        // due to collision and eviction
+        let occ = cache.occupancy();
+        assert_eq!(occ, 100.0);
+    }
+
+    #[test]
+    fn test_cache_invalidate_range_entire_cache() {
+        let mut cache = InstructionCache::new();
+
+        // Fill cache
+        for i in 0..100 {
+            cache.store(0x80000000 + i * 4, i);
+        }
+
+        assert!(!cache.is_empty());
+
+        // Invalidate entire range
+        cache.invalidate_range(0x00000000, 0xFFFFFFFF);
+
+        // All entries in range should be invalidated
+        for i in 0..100 {
+            assert_eq!(cache.fetch(0x80000000 + i * 4), None);
+        }
+    }
+
+    #[test]
+    fn test_cache_prefill_vs_store() {
+        let mut cache = InstructionCache::new();
+
+        let addr = 0x80000500;
+        let data = 0x12345678;
+
+        // prefill is an alias for store
+        cache.prefill(addr, data);
+        assert_eq!(cache.fetch(addr), Some(data));
+
+        // Store should work the same way
+        cache.store(addr, data);
+        assert_eq!(cache.fetch(addr), Some(data));
+    }
+
+    #[test]
+    fn test_cache_bios_execution_pattern() {
+        let mut cache = InstructionCache::new();
+
+        // Simulate BIOS execution pattern
+        let bios_start = 0xBFC00000;
+
+        // BIOS typically executes sequentially from start
+        for i in 0..512 {
+            let addr = bios_start + i * 4;
+            cache.store(addr, i);
+
+            // Verify immediate fetch works
+            assert_eq!(cache.fetch(addr), Some(i));
+        }
+
+        // All should still be cached
+        assert_eq!(cache.len(), 512);
+    }
+
+    #[test]
+    fn test_cache_ram_mirrors() {
+        let mut cache = InstructionCache::new();
+
+        // PSX has RAM mirrors at different addresses
+        // 0x00000000 (KUSEG), 0x80000000 (KSEG0 cached), 0xA0000000 (KSEG1 uncached)
+        // All three addresses map to the same cache index (1024)
+        // index = (addr >> 2) & 0x3FF = (0x1000 >> 2) & 0x3FF = 0x400 & 0x3FF = 0x0
+        // So they all map to index 0 with different tags
+        let kuseg_addr = 0x00001000;
+        let kseg0_addr = 0x80001000;
+        let kseg1_addr = 0xA0001000;
+
+        cache.store(kuseg_addr, 0x11111111);
+        cache.store(kseg0_addr, 0x22222222);
+        cache.store(kseg1_addr, 0x33333333);
+
+        // Since they map to the same index with different tags,
+        // only the last one should remain (direct-mapped cache behavior)
+        assert_eq!(cache.fetch(kuseg_addr), None); // Evicted
+        assert_eq!(cache.fetch(kseg0_addr), None); // Evicted
+        assert_eq!(cache.fetch(kseg1_addr), Some(0x33333333)); // Last stored
+    }
 }

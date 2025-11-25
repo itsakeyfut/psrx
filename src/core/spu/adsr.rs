@@ -357,3 +357,463 @@ impl Default for ADSREnvelope {
         }
     }
 }
+
+#[cfg(test)]
+#[allow(clippy::field_reassign_with_default)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_adsr_envelope_default() {
+        let env = ADSREnvelope::default();
+        assert_eq!(env.level, 0);
+        assert_eq!(env.phase, ADSRPhase::Off);
+        assert_eq!(env.attack_rate, 0);
+        assert_eq!(env.decay_rate, 0);
+        assert_eq!(env.sustain_level, 0);
+        assert_eq!(env.sustain_rate, 0);
+        assert_eq!(env.release_rate, 0);
+    }
+
+    #[test]
+    fn test_adsr_phase_transitions() {
+        let mut env = ADSREnvelope::default();
+
+        // Start in Off phase
+        assert_eq!(env.phase, ADSRPhase::Off);
+
+        // Transition to Attack
+        env.phase = ADSRPhase::Attack;
+        env.attack_rate = 127;
+        env.attack_mode = AttackMode::Linear;
+
+        // Tick until max level
+        while env.level < 32767 {
+            env.tick();
+        }
+
+        // Should transition to Decay
+        assert_eq!(env.phase, ADSRPhase::Decay);
+
+        // Decay to sustain level
+        env.decay_rate = 15;
+        env.sustain_level = 8;
+        while env.phase == ADSRPhase::Decay {
+            env.tick();
+        }
+
+        // Should be in Sustain
+        assert_eq!(env.phase, ADSRPhase::Sustain);
+    }
+
+    #[test]
+    fn test_attack_linear_mode() {
+        let mut env = ADSREnvelope::default();
+        env.phase = ADSRPhase::Attack;
+        env.attack_rate = 64;
+        env.attack_mode = AttackMode::Linear;
+        env.level = 0;
+
+        let initial_level = env.level;
+        env.tick();
+
+        // Linear mode should add constant step
+        assert!(env.level > initial_level, "Level should increase");
+        assert_eq!(env.phase, ADSRPhase::Attack, "Should stay in Attack");
+    }
+
+    #[test]
+    fn test_attack_exponential_mode() {
+        let mut env = ADSREnvelope::default();
+        env.phase = ADSRPhase::Attack;
+        env.attack_rate = 64;
+        env.attack_mode = AttackMode::Exponential;
+        env.level = 1000;
+
+        let initial_level = env.level;
+        env.tick();
+
+        // Exponential mode should increase by scaled step
+        assert!(
+            env.level > initial_level,
+            "Level should increase in exponential attack"
+        );
+    }
+
+    #[test]
+    fn test_attack_reaches_maximum() {
+        let mut env = ADSREnvelope::default();
+        env.phase = ADSRPhase::Attack;
+        env.attack_rate = 127; // Maximum rate
+        env.attack_mode = AttackMode::Linear;
+        env.level = 0;
+
+        // Tick until we reach max or transition to Decay
+        for _ in 0..10000 {
+            if env.phase != ADSRPhase::Attack {
+                break;
+            }
+            env.tick();
+        }
+
+        // Should have transitioned to Decay
+        assert_eq!(env.phase, ADSRPhase::Decay);
+        assert_eq!(env.level, 32767, "Should reach maximum level");
+    }
+
+    #[test]
+    fn test_attack_exponential_completes_near_max() {
+        let mut env = ADSREnvelope::default();
+        env.phase = ADSRPhase::Attack;
+        env.attack_rate = 32;
+        env.attack_mode = AttackMode::Exponential;
+        env.level = 32760; // Very close to max
+
+        // When step rounds to 0, should jump to max
+        env.tick();
+
+        assert_eq!(env.level, 32767, "Should complete to max level");
+        assert_eq!(env.phase, ADSRPhase::Decay, "Should transition to Decay");
+    }
+
+    #[test]
+    fn test_decay_phase() {
+        let mut env = ADSREnvelope::default();
+        env.phase = ADSRPhase::Decay;
+        env.level = 32767;
+        env.decay_rate = 8;
+        env.sustain_level = 10;
+
+        let initial_level = env.level;
+        env.tick();
+
+        // Decay should decrease level
+        assert!(env.level < initial_level, "Level should decrease in decay");
+    }
+
+    #[test]
+    fn test_decay_reaches_sustain_level() {
+        let mut env = ADSREnvelope::default();
+        env.phase = ADSRPhase::Decay;
+        env.level = 32767;
+        env.decay_rate = 15;
+        env.sustain_level = 8; // Target level: (8+1) << 11 = 18432
+
+        // Tick until we reach sustain or timeout
+        for _ in 0..100000 {
+            if env.phase != ADSRPhase::Decay {
+                break;
+            }
+            env.tick();
+        }
+
+        // Should have transitioned to Sustain
+        assert_eq!(env.phase, ADSRPhase::Sustain);
+
+        let expected_sustain = ((env.sustain_level as i32 + 1) << 11).min(32767) as i16;
+        assert_eq!(env.level, expected_sustain, "Should reach sustain level");
+    }
+
+    #[test]
+    fn test_sustain_linear_decrease() {
+        let mut env = ADSREnvelope::default();
+        env.phase = ADSRPhase::Sustain;
+        env.level = 10000;
+        env.sustain_rate = 16;
+        env.sustain_mode = SustainMode::Linear;
+
+        let initial_level = env.level;
+        env.tick();
+
+        // Linear sustain should decrease by constant step
+        assert!(
+            env.level < initial_level,
+            "Level should decrease in linear sustain"
+        );
+    }
+
+    #[test]
+    fn test_sustain_exponential_decrease() {
+        let mut env = ADSREnvelope::default();
+        env.phase = ADSRPhase::Sustain;
+        env.level = 10000;
+        env.sustain_rate = 16;
+        env.sustain_mode = SustainMode::Exponential;
+
+        let initial_level = env.level;
+        env.tick();
+
+        // Exponential sustain should decrease proportionally
+        assert!(
+            env.level < initial_level,
+            "Level should decrease in exponential sustain"
+        );
+    }
+
+    #[test]
+    fn test_sustain_reaches_zero() {
+        let mut env = ADSREnvelope::default();
+        env.phase = ADSRPhase::Sustain;
+        env.level = 100;
+        env.sustain_rate = 64;
+        env.sustain_mode = SustainMode::Linear;
+
+        // Tick until we reach zero or timeout
+        for _ in 0..10000 {
+            if env.phase == ADSRPhase::Off {
+                break;
+            }
+            env.tick();
+        }
+
+        // Should have transitioned to Off
+        assert_eq!(env.phase, ADSRPhase::Off);
+        assert_eq!(env.level, 0, "Level should reach zero");
+    }
+
+    #[test]
+    fn test_release_linear_mode() {
+        let mut env = ADSREnvelope::default();
+        env.phase = ADSRPhase::Release;
+        env.level = 10000;
+        env.release_rate = 16;
+        env.release_mode = ReleaseMode::Linear;
+
+        let initial_level = env.level;
+        env.tick();
+
+        // Release should decrease level
+        assert!(
+            env.level < initial_level,
+            "Level should decrease in linear release"
+        );
+    }
+
+    #[test]
+    fn test_release_exponential_mode() {
+        let mut env = ADSREnvelope::default();
+        env.phase = ADSRPhase::Release;
+        env.level = 10000;
+        env.release_rate = 16;
+        env.release_mode = ReleaseMode::Exponential;
+
+        let initial_level = env.level;
+        env.tick();
+
+        // Exponential release should decrease proportionally
+        assert!(
+            env.level < initial_level,
+            "Level should decrease in exponential release"
+        );
+    }
+
+    #[test]
+    fn test_release_reaches_zero() {
+        let mut env = ADSREnvelope::default();
+        env.phase = ADSRPhase::Release;
+        env.level = 100;
+        env.release_rate = 31; // Max rate
+        env.release_mode = ReleaseMode::Linear;
+
+        // Tick until we reach zero or timeout
+        for _ in 0..10000 {
+            if env.phase == ADSRPhase::Off {
+                break;
+            }
+            env.tick();
+        }
+
+        // Should have transitioned to Off
+        assert_eq!(env.phase, ADSRPhase::Off);
+        assert_eq!(env.level, 0, "Level should reach zero");
+    }
+
+    #[test]
+    fn test_off_phase_no_change() {
+        let mut env = ADSREnvelope::default();
+        env.phase = ADSRPhase::Off;
+        env.level = 0;
+
+        env.tick();
+
+        // Off phase should not change anything
+        assert_eq!(env.phase, ADSRPhase::Off);
+        assert_eq!(env.level, 0);
+    }
+
+    #[test]
+    fn test_rate_zero_no_change() {
+        let mut env = ADSREnvelope::default();
+        env.phase = ADSRPhase::Attack;
+        env.attack_rate = 0; // Zero rate
+        env.attack_mode = AttackMode::Linear;
+        env.level = 0;
+
+        env.tick();
+
+        // Zero rate should not change level
+        assert_eq!(env.level, 0, "Zero rate should not change level");
+        assert_eq!(env.phase, ADSRPhase::Attack, "Should stay in same phase");
+    }
+
+    #[test]
+    fn test_word_1_serialization() {
+        let mut env = ADSREnvelope::default();
+        env.sustain_level = 0xA;
+        env.decay_rate = 0x7;
+        env.attack_rate = 0x3F;
+        env.attack_mode = AttackMode::Exponential;
+
+        let word = env.to_word_1();
+
+        // Verify bit layout
+        assert_eq!(word & 0xF, 0xA, "Bits 0-3: Sustain Level");
+        assert_eq!((word >> 4) & 0xF, 0x7, "Bits 4-7: Decay Rate");
+        assert_eq!((word >> 8) & 0x7F, 0x3F, "Bits 8-14: Attack Rate");
+        assert_eq!((word >> 15) & 0x1, 1, "Bit 15: Attack Mode");
+    }
+
+    #[test]
+    fn test_word_2_serialization() {
+        let mut env = ADSREnvelope::default();
+        env.release_rate = 0x15;
+        env.release_mode = ReleaseMode::Exponential;
+        env.sustain_rate = 0x40;
+        env.sustain_mode = SustainMode::Exponential;
+
+        let word = env.to_word_2();
+
+        // Verify bit layout
+        assert_eq!(word & 0x1F, 0x15, "Bits 0-4: Release Rate");
+        assert_eq!((word >> 5) & 0x1, 1, "Bit 5: Release Mode");
+        assert_eq!((word >> 6) & 0x7F, 0x40, "Bits 6-12: Sustain Rate");
+        assert_eq!((word >> 15) & 0x1, 1, "Bit 15: Sustain Mode");
+    }
+
+    #[test]
+    fn test_word_1_deserialization() {
+        let mut env = ADSREnvelope::default();
+
+        // Word with known values
+        let word: u16 = (1 << 15) | (0x3F << 8) | (0x7 << 4) | 0xA;
+
+        env.set_word_1(word);
+
+        assert_eq!(env.sustain_level, 0xA);
+        assert_eq!(env.decay_rate, 0x7);
+        assert_eq!(env.attack_rate, 0x3F);
+        assert!(matches!(env.attack_mode, AttackMode::Exponential));
+    }
+
+    #[test]
+    fn test_word_2_deserialization() {
+        let mut env = ADSREnvelope::default();
+
+        // Word with known values
+        let word: u16 = (1 << 15) | (0x40 << 6) | (1 << 5) | 0x15;
+
+        env.set_word_2(word);
+
+        assert_eq!(env.release_rate, 0x15);
+        assert!(matches!(env.release_mode, ReleaseMode::Exponential));
+        assert_eq!(env.sustain_rate, 0x40);
+        assert!(matches!(env.sustain_mode, SustainMode::Exponential));
+    }
+
+    #[test]
+    fn test_serialization_round_trip() {
+        let mut env1 = ADSREnvelope::default();
+        env1.sustain_level = 12;
+        env1.decay_rate = 9;
+        env1.attack_rate = 100;
+        env1.attack_mode = AttackMode::Linear;
+        env1.release_rate = 20;
+        env1.release_mode = ReleaseMode::Exponential;
+        env1.sustain_rate = 50;
+        env1.sustain_mode = SustainMode::Linear;
+
+        let word1 = env1.to_word_1();
+        let word2 = env1.to_word_2();
+
+        let mut env2 = ADSREnvelope::default();
+        env2.set_word_1(word1);
+        env2.set_word_2(word2);
+
+        assert_eq!(env2.sustain_level, env1.sustain_level);
+        assert_eq!(env2.decay_rate, env1.decay_rate);
+        assert_eq!(env2.attack_rate, env1.attack_rate);
+        assert_eq!(env2.release_rate, env1.release_rate);
+        assert_eq!(env2.sustain_rate, env1.sustain_rate);
+    }
+
+    #[test]
+    fn test_sustain_level_calculation() {
+        let mut env = ADSREnvelope::default();
+        env.phase = ADSRPhase::Decay;
+        env.level = 32767;
+        env.decay_rate = 15;
+
+        // Test various sustain levels
+        for sustain_level in 0..=15u8 {
+            env.sustain_level = sustain_level;
+            env.level = 32767;
+            env.phase = ADSRPhase::Decay;
+
+            // Decay to sustain
+            for _ in 0..100000 {
+                if env.phase != ADSRPhase::Decay {
+                    break;
+                }
+                env.tick();
+            }
+
+            let expected = ((sustain_level as i32 + 1) << 11).min(32767) as i16;
+            assert_eq!(
+                env.level, expected,
+                "Sustain level {} should reach {}",
+                sustain_level, expected
+            );
+        }
+    }
+
+    #[test]
+    fn test_level_saturation() {
+        let mut env = ADSREnvelope::default();
+        env.phase = ADSRPhase::Attack;
+        env.attack_rate = 127;
+        env.attack_mode = AttackMode::Linear;
+        env.level = 32760;
+
+        // Tick multiple times
+        for _ in 0..100 {
+            env.tick();
+            // Level is i16, always in valid range
+            // Just verify it reaches the attack phase completion
+            if env.phase != ADSRPhase::Attack {
+                break;
+            }
+        }
+
+        // Should have transitioned to Decay
+        assert_eq!(env.phase, ADSRPhase::Decay, "Should reach Decay phase");
+    }
+
+    #[test]
+    fn test_level_floor_zero() {
+        let mut env = ADSREnvelope::default();
+        env.phase = ADSRPhase::Release;
+        env.release_rate = 31;
+        env.release_mode = ReleaseMode::Linear;
+        env.level = 10;
+
+        // Tick multiple times
+        for _ in 0..1000 {
+            env.tick();
+            // Level should never go below zero
+            assert!(env.level >= 0, "Level should not go below zero");
+            if env.phase == ADSRPhase::Off {
+                break;
+            }
+        }
+    }
+}

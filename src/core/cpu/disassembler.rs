@@ -305,4 +305,507 @@ mod tests {
         let result = Disassembler::disassemble(0xFFFFFFFF, 0);
         assert!(result.starts_with("???"));
     }
+
+    // ========== Additional R-Type (SPECIAL) Tests ==========
+
+    #[test]
+    fn test_disasm_srl() {
+        // SRL r1, r2, 4
+        // Format: 000000 00000 00010 00001 00100 000010
+        // instr = (0 << 26) | (0 << 21) | (2 << 16) | (1 << 11) | (4 << 6) | 2
+        // Encoding: 0x00020902
+        let result = Disassembler::disassemble(0x00020902, 0);
+        assert_eq!(result, "srl r1, r2, 4");
+    }
+
+    #[test]
+    fn test_disasm_sra() {
+        // SRA r3, r2, 8
+        let result = Disassembler::disassemble(0x00021A03, 0);
+        assert_eq!(result, "sra r3, r2, 8");
+    }
+
+    #[test]
+    fn test_disasm_sllv() {
+        // SLLV r4, r3, r2
+        let result = Disassembler::disassemble(0x00432004, 0);
+        assert_eq!(result, "sllv r4, r3, r2");
+    }
+
+    #[test]
+    fn test_disasm_srlv() {
+        // SRLV r5, r4, r3
+        let result = Disassembler::disassemble(0x00642806, 0);
+        assert_eq!(result, "srlv r5, r4, r3");
+    }
+
+    #[test]
+    fn test_disasm_srav() {
+        // SRAV r6, r5, r4
+        let result = Disassembler::disassemble(0x00853007, 0);
+        assert_eq!(result, "srav r6, r5, r4");
+    }
+
+    #[test]
+    fn test_disasm_jalr_explicit_rd() {
+        // JALR r10, r8
+        let result = Disassembler::disassemble(0x01005009, 0);
+        assert_eq!(result, "jalr r10, r8");
+    }
+
+    #[test]
+    fn test_disasm_jalr_implicit_rd() {
+        // JALR r31, r10 (commonly written as just "jalr r10")
+        let result = Disassembler::disassemble(0x014FF809, 0);
+        assert_eq!(result, "jalr r10");
+    }
+
+    #[test]
+    fn test_disasm_syscall() {
+        let result = Disassembler::disassemble(0x0000000C, 0);
+        assert_eq!(result, "syscall");
+    }
+
+    #[test]
+    fn test_disasm_break() {
+        let result = Disassembler::disassemble(0x0000000D, 0);
+        assert_eq!(result, "break");
+    }
+
+    #[test]
+    fn test_disasm_mthi() {
+        // MTHI r5
+        let result = Disassembler::disassemble(0x00A00011, 0);
+        assert_eq!(result, "mthi r5");
+    }
+
+    #[test]
+    fn test_disasm_mflo() {
+        // MFLO r6
+        let result = Disassembler::disassemble(0x00003012, 0);
+        assert_eq!(result, "mflo r6");
+    }
+
+    #[test]
+    fn test_disasm_mtlo() {
+        // MTLO r7
+        let result = Disassembler::disassemble(0x00E00013, 0);
+        assert_eq!(result, "mtlo r7");
+    }
+
+    #[test]
+    fn test_disasm_mult() {
+        // MULT r8, r9
+        let result = Disassembler::disassemble(0x01090018, 0);
+        assert_eq!(result, "mult r8, r9");
+    }
+
+    #[test]
+    fn test_disasm_multu() {
+        // MULTU r10, r11
+        let result = Disassembler::disassemble(0x014B0019, 0);
+        assert_eq!(result, "multu r10, r11");
+    }
+
+    #[test]
+    fn test_disasm_div() {
+        // DIV r12, r13
+        let result = Disassembler::disassemble(0x018D001A, 0);
+        assert_eq!(result, "div r12, r13");
+    }
+
+    #[test]
+    fn test_disasm_divu() {
+        // DIVU r14, r15
+        let result = Disassembler::disassemble(0x01CF001B, 0);
+        assert_eq!(result, "divu r14, r15");
+    }
+
+    #[test]
+    fn test_disasm_add() {
+        // ADD r3, r1, r2
+        let result = Disassembler::disassemble(0x00221820, 0);
+        assert_eq!(result, "add r3, r1, r2");
+    }
+
+    #[test]
+    fn test_disasm_addu() {
+        // ADDU r4, r2, r3
+        let result = Disassembler::disassemble(0x00432021, 0);
+        assert_eq!(result, "addu r4, r2, r3");
+    }
+
+    #[test]
+    fn test_disasm_sub() {
+        // SUB r5, r3, r4
+        let result = Disassembler::disassemble(0x00642822, 0);
+        assert_eq!(result, "sub r5, r3, r4");
+    }
+
+    #[test]
+    fn test_disasm_subu() {
+        // SUBU r6, r4, r5
+        let result = Disassembler::disassemble(0x00853023, 0);
+        assert_eq!(result, "subu r6, r4, r5");
+    }
+
+    #[test]
+    fn test_disasm_and() {
+        // AND r7, r5, r6
+        let result = Disassembler::disassemble(0x00A63824, 0);
+        assert_eq!(result, "and r7, r5, r6");
+    }
+
+    #[test]
+    fn test_disasm_xor() {
+        // XOR r9, r7, r8
+        let result = Disassembler::disassemble(0x00E84826, 0);
+        assert_eq!(result, "xor r9, r7, r8");
+    }
+
+    #[test]
+    fn test_disasm_nor() {
+        // NOR r10, r8, r9
+        let result = Disassembler::disassemble(0x01095027, 0);
+        assert_eq!(result, "nor r10, r8, r9");
+    }
+
+    #[test]
+    fn test_disasm_slt() {
+        // SLT r11, r9, r10
+        let result = Disassembler::disassemble(0x012A582A, 0);
+        assert_eq!(result, "slt r11, r9, r10");
+    }
+
+    #[test]
+    fn test_disasm_sltu() {
+        // SLTU r12, r10, r11
+        let result = Disassembler::disassemble(0x014B602B, 0);
+        assert_eq!(result, "sltu r12, r10, r11");
+    }
+
+    // ========== Additional I-Type Tests ==========
+
+    #[test]
+    fn test_disasm_bne() {
+        // BNE r1, r2, 8
+        let result = Disassembler::disassemble(0x14220008, 0);
+        assert_eq!(result, "bne r1, r2, 8");
+    }
+
+    #[test]
+    fn test_disasm_blez() {
+        // BLEZ r3, 4
+        let result = Disassembler::disassemble(0x18600004, 0);
+        assert_eq!(result, "blez r3, 4");
+    }
+
+    #[test]
+    fn test_disasm_bgtz() {
+        // BGTZ r4, -2
+        let result = Disassembler::disassemble(0x1C80FFFE, 0);
+        assert_eq!(result, "bgtz r4, -2");
+    }
+
+    #[test]
+    fn test_disasm_addi() {
+        // ADDI r5, r4, -100
+        let result = Disassembler::disassemble(0x2085FF9C, 0);
+        assert_eq!(result, "addi r5, r4, -100");
+    }
+
+    #[test]
+    fn test_disasm_addiu_negative() {
+        // ADDIU r6, r5, -1
+        let result = Disassembler::disassemble(0x24A6FFFF, 0);
+        assert_eq!(result, "addiu r6, r5, -1");
+    }
+
+    #[test]
+    fn test_disasm_slti() {
+        // SLTI r7, r6, 100
+        let result = Disassembler::disassemble(0x28C70064, 0);
+        assert_eq!(result, "slti r7, r6, 100");
+    }
+
+    #[test]
+    fn test_disasm_sltiu() {
+        // SLTIU r8, r7, 200
+        let result = Disassembler::disassemble(0x2CE800C8, 0);
+        assert_eq!(result, "sltiu r8, r7, 200");
+    }
+
+    #[test]
+    fn test_disasm_xori() {
+        // XORI r9, r8, 0xABCD
+        let result = Disassembler::disassemble(0x3909ABCD, 0);
+        assert_eq!(result, "xori r9, r8, 0xABCD");
+    }
+
+    #[test]
+    fn test_disasm_lb() {
+        // LB r10, -128(r9)
+        let result = Disassembler::disassemble(0x812AFF80, 0);
+        assert_eq!(result, "lb r10, -128(r9)");
+    }
+
+    #[test]
+    fn test_disasm_lh() {
+        // LH r11, 256(r10)
+        let result = Disassembler::disassemble(0x854B0100, 0);
+        assert_eq!(result, "lh r11, 256(r10)");
+    }
+
+    #[test]
+    fn test_disasm_lwl() {
+        // LWL r12, 3(r11)
+        let result = Disassembler::disassemble(0x896C0003, 0);
+        assert_eq!(result, "lwl r12, 3(r11)");
+    }
+
+    #[test]
+    fn test_disasm_lbu() {
+        // LBU r13, 0xFF(r12)
+        let result = Disassembler::disassemble(0x918D00FF, 0);
+        assert_eq!(result, "lbu r13, 255(r12)");
+    }
+
+    #[test]
+    fn test_disasm_lhu() {
+        // LHU r14, 0x1234(r13)
+        let result = Disassembler::disassemble(0x95AE1234, 0);
+        assert_eq!(result, "lhu r14, 4660(r13)");
+    }
+
+    #[test]
+    fn test_disasm_lwr() {
+        // LWR r15, 2(r14)
+        let result = Disassembler::disassemble(0x99CF0002, 0);
+        assert_eq!(result, "lwr r15, 2(r14)");
+    }
+
+    #[test]
+    fn test_disasm_sb() {
+        // SB r16, 64(r15)
+        let result = Disassembler::disassemble(0xA1F00040, 0);
+        assert_eq!(result, "sb r16, 64(r15)");
+    }
+
+    #[test]
+    fn test_disasm_sh() {
+        // SH r17, -8(r16)
+        let result = Disassembler::disassemble(0xA611FFF8, 0);
+        assert_eq!(result, "sh r17, -8(r16)");
+    }
+
+    #[test]
+    fn test_disasm_swl() {
+        // SWL r18, 1(r17)
+        let result = Disassembler::disassemble(0xAA320001, 0);
+        assert_eq!(result, "swl r18, 1(r17)");
+    }
+
+    #[test]
+    fn test_disasm_swr() {
+        // SWR r19, 3(r18)
+        // Format: 101110 10010 10011 0000000000000011
+        // Opcode 0x2E (46) is SWR, rs=18, rt=19, imm=3
+        // Encoding: 0xBA530003
+        let result = Disassembler::disassemble(0xBA530003, 0);
+        assert_eq!(result, "swr r19, 3(r18)");
+    }
+
+    // ========== REGIMM Tests ==========
+
+    #[test]
+    fn test_disasm_bltz() {
+        // BLTZ r5, -10
+        let result = Disassembler::disassemble(0x04A0FFF6, 0);
+        assert_eq!(result, "bltz r5, -10");
+    }
+
+    #[test]
+    fn test_disasm_bgez() {
+        // BGEZ r6, 20
+        let result = Disassembler::disassemble(0x04C10014, 0);
+        assert_eq!(result, "bgez r6, 20");
+    }
+
+    #[test]
+    fn test_disasm_bltzal() {
+        // BLTZAL r7, -100
+        let result = Disassembler::disassemble(0x04F0FF9C, 0);
+        assert_eq!(result, "bltzal r7, -100");
+    }
+
+    #[test]
+    fn test_disasm_bgezal() {
+        // BGEZAL r8, 100
+        let result = Disassembler::disassemble(0x05110064, 0);
+        assert_eq!(result, "bgezal r8, 100");
+    }
+
+    // ========== COP0 Tests ==========
+
+    #[test]
+    fn test_disasm_mfc0() {
+        // MFC0 r5, cop0r12 (Status Register)
+        let result = Disassembler::disassemble(0x40056000, 0);
+        assert_eq!(result, "mfc0 r5, cop0r12");
+    }
+
+    #[test]
+    fn test_disasm_mfc0_cause() {
+        // MFC0 r6, cop0r13 (Cause Register)
+        let result = Disassembler::disassemble(0x40066800, 0);
+        assert_eq!(result, "mfc0 r6, cop0r13");
+    }
+
+    #[test]
+    fn test_disasm_mtc0() {
+        // MTC0 r7, cop0r12 (Status Register)
+        let result = Disassembler::disassemble(0x40876000, 0);
+        assert_eq!(result, "mtc0 r7, cop0r12");
+    }
+
+    #[test]
+    fn test_disasm_mtc0_epc() {
+        // MTC0 r8, cop0r14 (EPC)
+        let result = Disassembler::disassemble(0x40887000, 0);
+        assert_eq!(result, "mtc0 r8, cop0r14");
+    }
+
+    #[test]
+    fn test_disasm_rfe() {
+        // RFE (Return From Exception)
+        let result = Disassembler::disassemble(0x42000010, 0);
+        assert_eq!(result, "rfe");
+    }
+
+    // ========== Jump Target Calculation Tests ==========
+
+    #[test]
+    fn test_disasm_j_with_region() {
+        // J instruction preserves upper 4 bits of PC
+        // PC = 0x80001000, Target = 0x00100000
+        // Final address = 0x80400000
+        let result = Disassembler::disassemble(0x08100000, 0x80001000);
+        assert_eq!(result, "j 0x80400000");
+    }
+
+    #[test]
+    fn test_disasm_jal_bios_region() {
+        // JAL from BIOS region
+        // PC = 0xBFC00100, Target = 0x00000100
+        // Final address = (PC & 0xF0000000) | (target << 2)
+        // = 0xB0000000 | (0x00000100 << 2) = 0xB0000400
+        let result = Disassembler::disassemble(0x0C000100, 0xBFC00100);
+        assert_eq!(result, "jal 0xB0000400");
+    }
+
+    #[test]
+    fn test_disasm_j_kernel_region() {
+        // J from kernel region
+        // PC = 0xA0001000, Target = 0x00200000
+        // Final address = 0xA0800000
+        let result = Disassembler::disassemble(0x08200000, 0xA0001000);
+        assert_eq!(result, "j 0xA0800000");
+    }
+
+    // ========== Negative Offsets and Edge Cases ==========
+
+    #[test]
+    fn test_disasm_beq_negative_offset() {
+        // BEQ with negative offset
+        let result = Disassembler::disassemble(0x1022FFFF, 0);
+        assert_eq!(result, "beq r1, r2, -1");
+    }
+
+    #[test]
+    fn test_disasm_bne_max_positive_offset() {
+        // BNE with max positive offset (32767)
+        let result = Disassembler::disassemble(0x14227FFF, 0);
+        assert_eq!(result, "bne r1, r2, 32767");
+    }
+
+    #[test]
+    fn test_disasm_bne_max_negative_offset() {
+        // BNE with max negative offset (-32768)
+        let result = Disassembler::disassemble(0x14228000, 0);
+        assert_eq!(result, "bne r1, r2, -32768");
+    }
+
+    #[test]
+    fn test_disasm_lw_negative_offset() {
+        // LW with large negative offset
+        let result = Disassembler::disassemble(0x8C228000, 0);
+        assert_eq!(result, "lw r2, -32768(r1)");
+    }
+
+    #[test]
+    fn test_disasm_sw_max_positive_offset() {
+        // SW with max positive offset (32767)
+        let result = Disassembler::disassemble(0xAC227FFF, 0);
+        assert_eq!(result, "sw r2, 32767(r1)");
+    }
+
+    // ========== Special Register Cases ==========
+
+    #[test]
+    fn test_disasm_move_pseudo() {
+        // MOVE pseudo-instruction (OR rd, rs, r0)
+        let result = Disassembler::disassemble(0x00201825, 0);
+        assert_eq!(result, "or r3, r1, r0");
+    }
+
+    #[test]
+    fn test_disasm_zero_register() {
+        // Operations involving r0
+        let result = Disassembler::disassemble(0x00001020, 0); // ADD r2, r0, r0
+        assert_eq!(result, "add r2, r0, r0");
+    }
+
+    #[test]
+    fn test_disasm_return_address() {
+        // JR r31 (common return instruction)
+        let result = Disassembler::disassemble(0x03E00008, 0);
+        assert_eq!(result, "jr r31");
+    }
+
+    // ========== Unknown Instruction Tests ==========
+
+    #[test]
+    fn test_disasm_invalid_special_funct() {
+        // Invalid SPECIAL function code
+        let result = Disassembler::disassemble(0x0000003F, 0);
+        assert!(result.starts_with("???"));
+    }
+
+    #[test]
+    fn test_disasm_invalid_regimm_rt() {
+        // Invalid REGIMM rt field
+        let result = Disassembler::disassemble(0x041FFFFF, 0);
+        assert!(result.starts_with("???"));
+    }
+
+    #[test]
+    fn test_disasm_invalid_cop0_rs() {
+        // Invalid COP0 rs field
+        let result = Disassembler::disassemble(0x42FFFFFF, 0);
+        assert!(result.starts_with("???"));
+    }
+
+    #[test]
+    fn test_disasm_invalid_cop0_funct() {
+        // Invalid COP0 function in CO space
+        let result = Disassembler::disassemble(0x4200001F, 0);
+        assert!(result.starts_with("???"));
+    }
+
+    #[test]
+    fn test_disasm_unimplemented_opcode() {
+        // Unimplemented opcode (e.g., 0x30 - not defined)
+        let result = Disassembler::disassemble(0xC0000000, 0);
+        assert!(result.starts_with("???"));
+    }
 }

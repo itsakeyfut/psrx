@@ -385,4 +385,348 @@ mod tests {
         let device = MockDevice::new(0x1F801000, 4);
         assert_eq!(device.name(), "MockDevice");
     }
+
+    #[test]
+    fn test_read_write_16bit_lower_half() {
+        let mut device = MockDevice::new(0x1F801000, 4);
+
+        // Write to lower 16 bits (offset 0x00, bits 0-15)
+        device.write_register16(0x00, 0xABCD).unwrap();
+
+        // Read back as 16-bit
+        assert_eq!(device.read_register16(0x00).unwrap(), 0xABCD);
+
+        // Read back as 32-bit (upper 16 bits should be 0)
+        assert_eq!(device.read_register(0x00).unwrap(), 0x0000ABCD);
+    }
+
+    #[test]
+    fn test_read_write_16bit_upper_half() {
+        let mut device = MockDevice::new(0x1F801000, 4);
+
+        // Write to upper 16 bits (offset 0x02, bits 16-31)
+        device.write_register16(0x02, 0x1234).unwrap();
+
+        // Read back as 16-bit
+        assert_eq!(device.read_register16(0x02).unwrap(), 0x1234);
+
+        // Read back as 32-bit (lower 16 bits should be 0)
+        assert_eq!(device.read_register(0x00).unwrap(), 0x12340000);
+    }
+
+    #[test]
+    fn test_read_write_16bit_both_halves() {
+        let mut device = MockDevice::new(0x1F801000, 4);
+
+        // Write to both halves
+        device.write_register16(0x00, 0xABCD).unwrap();
+        device.write_register16(0x02, 0x1234).unwrap();
+
+        // Read back as 32-bit
+        assert_eq!(device.read_register(0x00).unwrap(), 0x1234ABCD);
+
+        // Read back each half
+        assert_eq!(device.read_register16(0x00).unwrap(), 0xABCD);
+        assert_eq!(device.read_register16(0x02).unwrap(), 0x1234);
+    }
+
+    #[test]
+    fn test_read_write_16bit_preserves_other_half() {
+        let mut device = MockDevice::new(0x1F801000, 4);
+
+        // Write 32-bit value
+        device.write_register(0x00, 0xDEADBEEF).unwrap();
+
+        // Write only lower 16 bits
+        device.write_register16(0x00, 0x1234).unwrap();
+
+        // Upper 16 bits should be preserved
+        assert_eq!(device.read_register(0x00).unwrap(), 0xDEAD1234);
+
+        // Write only upper 16 bits
+        device.write_register16(0x02, 0x5678).unwrap();
+
+        // Lower 16 bits should be preserved
+        assert_eq!(device.read_register(0x00).unwrap(), 0x56781234);
+    }
+
+    #[test]
+    fn test_read_write_8bit_all_bytes() {
+        let mut device = MockDevice::new(0x1F801000, 4);
+
+        // Write to all 4 bytes
+        device.write_register8(0x00, 0x12).unwrap();
+        device.write_register8(0x01, 0x34).unwrap();
+        device.write_register8(0x02, 0x56).unwrap();
+        device.write_register8(0x03, 0x78).unwrap();
+
+        // Read back as 32-bit (little-endian)
+        assert_eq!(device.read_register(0x00).unwrap(), 0x78563412);
+
+        // Read back each byte
+        assert_eq!(device.read_register8(0x00).unwrap(), 0x12);
+        assert_eq!(device.read_register8(0x01).unwrap(), 0x34);
+        assert_eq!(device.read_register8(0x02).unwrap(), 0x56);
+        assert_eq!(device.read_register8(0x03).unwrap(), 0x78);
+    }
+
+    #[test]
+    fn test_read_write_8bit_preserves_other_bytes() {
+        let mut device = MockDevice::new(0x1F801000, 4);
+
+        // Write 32-bit value
+        device.write_register(0x00, 0xDEADBEEF).unwrap();
+
+        // Write only byte 0
+        device.write_register8(0x00, 0x12).unwrap();
+        assert_eq!(device.read_register(0x00).unwrap(), 0xDEADBE12);
+
+        // Write only byte 1
+        device.write_register8(0x01, 0x34).unwrap();
+        assert_eq!(device.read_register(0x00).unwrap(), 0xDEAD3412);
+
+        // Write only byte 2
+        device.write_register8(0x02, 0x56).unwrap();
+        assert_eq!(device.read_register(0x00).unwrap(), 0xDE563412);
+
+        // Write only byte 3
+        device.write_register8(0x03, 0x78).unwrap();
+        assert_eq!(device.read_register(0x00).unwrap(), 0x78563412);
+    }
+
+    #[test]
+    fn test_mixed_size_accesses() {
+        let mut device = MockDevice::new(0x1F801000, 4);
+
+        // Write 32-bit
+        device.write_register(0x00, 0x12345678).unwrap();
+
+        // Read as 16-bit
+        assert_eq!(device.read_register16(0x00).unwrap(), 0x5678);
+        assert_eq!(device.read_register16(0x02).unwrap(), 0x1234);
+
+        // Read as 8-bit
+        assert_eq!(device.read_register8(0x00).unwrap(), 0x78);
+        assert_eq!(device.read_register8(0x01).unwrap(), 0x56);
+        assert_eq!(device.read_register8(0x02).unwrap(), 0x34);
+        assert_eq!(device.read_register8(0x03).unwrap(), 0x12);
+    }
+
+    #[test]
+    fn test_alignment_handling_16bit() {
+        let mut device = MockDevice::new(0x1F801000, 4);
+
+        // Write to aligned addresses
+        device.write_register16(0x00, 0x1234).unwrap();
+        device.write_register16(0x02, 0x5678).unwrap();
+
+        // Both writes should work correctly
+        assert_eq!(device.read_register(0x00).unwrap(), 0x56781234);
+    }
+
+    #[test]
+    fn test_alignment_handling_8bit() {
+        let mut device = MockDevice::new(0x1F801000, 4);
+
+        // 8-bit accesses should work at any offset
+        device.write_register8(0x00, 0x11).unwrap();
+        device.write_register8(0x01, 0x22).unwrap();
+        device.write_register8(0x02, 0x33).unwrap();
+        device.write_register8(0x03, 0x44).unwrap();
+
+        assert_eq!(device.read_register(0x00).unwrap(), 0x44332211);
+    }
+
+    #[test]
+    fn test_multiple_registers() {
+        let mut device = MockDevice::new(0x1F801000, 8);
+
+        // Write to multiple registers
+        device.write_register(0x00, 0x11111111).unwrap();
+        device.write_register(0x04, 0x22222222).unwrap();
+        device.write_register(0x08, 0x33333333).unwrap();
+        device.write_register(0x0C, 0x44444444).unwrap();
+
+        // Read back
+        assert_eq!(device.read_register(0x00).unwrap(), 0x11111111);
+        assert_eq!(device.read_register(0x04).unwrap(), 0x22222222);
+        assert_eq!(device.read_register(0x08).unwrap(), 0x33333333);
+        assert_eq!(device.read_register(0x0C).unwrap(), 0x44444444);
+    }
+
+    #[test]
+    fn test_address_range_boundaries() {
+        let device = MockDevice::new(0x1F801000, 4);
+
+        // Test exact start
+        assert!(device.contains(0x1F801000));
+
+        // Test exact end
+        assert!(device.contains(0x1F80100F));
+
+        // Test one before start
+        assert!(!device.contains(0x1F800FFF));
+
+        // Test one after end
+        assert!(!device.contains(0x1F801010));
+    }
+
+    #[test]
+    fn test_contains_with_large_range() {
+        let device = MockDevice::new(0x1F801000, 256); // 1KB of registers
+
+        // Test start and end
+        assert!(device.contains(0x1F801000));
+        assert!(device.contains(0x1F8013FF));
+
+        // Test outside
+        assert!(!device.contains(0x1F800FFF));
+        assert!(!device.contains(0x1F801400));
+
+        // Test middle
+        assert!(device.contains(0x1F801200));
+    }
+
+    #[test]
+    fn test_read_register16_unaligned_calculation() {
+        let mut device = MockDevice::new(0x1F801000, 4);
+
+        // Write a known 32-bit value
+        device.write_register(0x00, 0xAABBCCDD).unwrap();
+
+        // Read 16-bit at offset 0x00 (bits 0-15)
+        assert_eq!(device.read_register16(0x00).unwrap(), 0xCCDD);
+
+        // Read 16-bit at offset 0x02 (bits 16-31)
+        assert_eq!(device.read_register16(0x02).unwrap(), 0xAABB);
+    }
+
+    #[test]
+    fn test_read_register8_all_offsets() {
+        let mut device = MockDevice::new(0x1F801000, 4);
+
+        // Write a known 32-bit value (little-endian: 0xDD, 0xCC, 0xBB, 0xAA)
+        device.write_register(0x00, 0xAABBCCDD).unwrap();
+
+        // Read each byte
+        assert_eq!(device.read_register8(0x00).unwrap(), 0xDD);
+        assert_eq!(device.read_register8(0x01).unwrap(), 0xCC);
+        assert_eq!(device.read_register8(0x02).unwrap(), 0xBB);
+        assert_eq!(device.read_register8(0x03).unwrap(), 0xAA);
+    }
+
+    #[test]
+    fn test_write_then_partial_read() {
+        let mut device = MockDevice::new(0x1F801000, 4);
+
+        // Write full 32-bit value
+        device.write_register(0x00, 0x12345678).unwrap();
+
+        // Read parts
+        assert_eq!(device.read_register16(0x00).unwrap(), 0x5678);
+        assert_eq!(device.read_register16(0x02).unwrap(), 0x1234);
+        assert_eq!(device.read_register8(0x00).unwrap(), 0x78);
+        assert_eq!(device.read_register8(0x01).unwrap(), 0x56);
+        assert_eq!(device.read_register8(0x02).unwrap(), 0x34);
+        assert_eq!(device.read_register8(0x03).unwrap(), 0x12);
+    }
+
+    #[test]
+    fn test_sequential_8bit_writes_build_32bit() {
+        let mut device = MockDevice::new(0x1F801000, 4);
+
+        // Write bytes sequentially
+        device.write_register8(0x00, 0xEF).unwrap();
+        device.write_register8(0x01, 0xBE).unwrap();
+        device.write_register8(0x02, 0xAD).unwrap();
+        device.write_register8(0x03, 0xDE).unwrap();
+
+        // Should form 0xDEADBEEF in little-endian
+        assert_eq!(device.read_register(0x00).unwrap(), 0xDEADBEEF);
+    }
+
+    #[test]
+    fn test_sequential_16bit_writes_build_32bit() {
+        let mut device = MockDevice::new(0x1F801000, 4);
+
+        // Write half-words sequentially
+        device.write_register16(0x00, 0xBEEF).unwrap();
+        device.write_register16(0x02, 0xDEAD).unwrap();
+
+        // Should form 0xDEADBEEF in little-endian
+        assert_eq!(device.read_register(0x00).unwrap(), 0xDEADBEEF);
+    }
+
+    #[test]
+    fn test_zero_value_handling() {
+        let mut device = MockDevice::new(0x1F801000, 4);
+
+        // Write zero
+        device.write_register(0x00, 0x00000000).unwrap();
+        assert_eq!(device.read_register(0x00).unwrap(), 0x00000000);
+
+        // Write non-zero then zero
+        device.write_register(0x00, 0xFFFFFFFF).unwrap();
+        device.write_register(0x00, 0x00000000).unwrap();
+        assert_eq!(device.read_register(0x00).unwrap(), 0x00000000);
+
+        // Write zero to parts
+        device.write_register(0x00, 0xFFFFFFFF).unwrap();
+        device.write_register16(0x00, 0x0000).unwrap();
+        assert_eq!(device.read_register(0x00).unwrap(), 0xFFFF0000);
+
+        device.write_register8(0x02, 0x00).unwrap();
+        assert_eq!(device.read_register(0x00).unwrap(), 0xFF000000);
+    }
+
+    #[test]
+    fn test_max_value_handling() {
+        let mut device = MockDevice::new(0x1F801000, 4);
+
+        // Write max values
+        device.write_register(0x00, 0xFFFFFFFF).unwrap();
+        assert_eq!(device.read_register(0x00).unwrap(), 0xFFFFFFFF);
+        assert_eq!(device.read_register16(0x00).unwrap(), 0xFFFF);
+        assert_eq!(device.read_register16(0x02).unwrap(), 0xFFFF);
+        assert_eq!(device.read_register8(0x00).unwrap(), 0xFF);
+        assert_eq!(device.read_register8(0x01).unwrap(), 0xFF);
+        assert_eq!(device.read_register8(0x02).unwrap(), 0xFF);
+        assert_eq!(device.read_register8(0x03).unwrap(), 0xFF);
+    }
+
+    #[test]
+    fn test_register_independence() {
+        let mut device = MockDevice::new(0x1F801000, 8);
+
+        // Write to different registers
+        device.write_register(0x00, 0x11111111).unwrap();
+        device.write_register(0x04, 0x22222222).unwrap();
+        device.write_register(0x08, 0x33333333).unwrap();
+
+        // Modify one register
+        device.write_register(0x04, 0xFFFFFFFF).unwrap();
+
+        // Others should be unchanged
+        assert_eq!(device.read_register(0x00).unwrap(), 0x11111111);
+        assert_eq!(device.read_register(0x04).unwrap(), 0xFFFFFFFF);
+        assert_eq!(device.read_register(0x08).unwrap(), 0x33333333);
+    }
+
+    #[test]
+    fn test_out_of_range_8bit() {
+        let mut device = MockDevice::new(0x1F801000, 4);
+
+        // Out of range 8-bit access should fail
+        assert!(device.read_register8(0x10).is_err());
+        assert!(device.write_register8(0x10, 0xFF).is_err());
+    }
+
+    #[test]
+    fn test_out_of_range_16bit() {
+        let mut device = MockDevice::new(0x1F801000, 4);
+
+        // Out of range 16-bit access should fail
+        assert!(device.read_register16(0x10).is_err());
+        assert!(device.write_register16(0x10, 0xFFFF).is_err());
+    }
 }

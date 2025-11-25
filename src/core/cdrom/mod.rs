@@ -80,8 +80,6 @@ use super::timing::{EventHandle, TickCount};
 pub mod cd_audio;
 mod commands;
 mod disc;
-#[cfg(test)]
-mod tests;
 
 pub use cd_audio::CDAudio;
 pub use disc::{DiscImage, Track, TrackType};

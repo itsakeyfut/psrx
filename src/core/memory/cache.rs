@@ -143,3 +143,397 @@ impl Bus {
         &mut self.ram
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_icache_prefill_queue_basic() {
+        let mut bus = Bus::new();
+
+        // Initially empty
+        assert_eq!(bus.drain_icache_prefill_queue().len(), 0);
+
+        // Queue an instruction in the prefill range
+        bus.queue_icache_prefill(0x00000500, 0x12345678);
+
+        // Should have queued both cached and uncached aliases
+        let queue = bus.drain_icache_prefill_queue();
+        assert_eq!(queue.len(), 2);
+
+        // Check that both aliases are present
+        assert!(queue.contains(&(0x80000500, 0x12345678))); // KSEG0 cached
+        assert!(queue.contains(&(0x00000500, 0x12345678))); // KUSEG
+    }
+
+    #[test]
+    fn test_icache_prefill_queue_within_range() {
+        let mut bus = Bus::new();
+
+        // Queue instructions at start of range
+        bus.queue_icache_prefill(0x00000000, 0x11111111);
+        assert_eq!(bus.drain_icache_prefill_queue().len(), 2);
+
+        // Queue instructions in middle of range
+        bus.queue_icache_prefill(0x00008000, 0x22222222);
+        assert_eq!(bus.drain_icache_prefill_queue().len(), 2);
+
+        // Queue instructions at end of range
+        bus.queue_icache_prefill(0x0000FFFC, 0x33333333);
+        assert_eq!(bus.drain_icache_prefill_queue().len(), 2);
+    }
+
+    #[test]
+    fn test_icache_prefill_queue_outside_range() {
+        let mut bus = Bus::new();
+
+        // Queue instruction outside prefill range (> 0x10000)
+        // Note: ICACHE_PREFILL_END is 0x10000, and the range is ..= (inclusive)
+        // so 0x10000 is still within range, but 0x10001 is outside
+        bus.queue_icache_prefill(0x00010001, 0x12345678);
+        assert_eq!(bus.drain_icache_prefill_queue().len(), 0);
+
+        // Queue instruction well outside range
+        bus.queue_icache_prefill(0x00100000, 0xABCDEF00);
+        assert_eq!(bus.drain_icache_prefill_queue().len(), 0);
+    }
+
+    #[test]
+    fn test_icache_prefill_queue_boundary() {
+        let mut bus = Bus::new();
+
+        // Test boundary at 0x10000 (inclusive, because range is ..=)
+        bus.queue_icache_prefill(0x0000FFFC, 0x11111111); // Just before end
+        assert_eq!(bus.drain_icache_prefill_queue().len(), 2);
+
+        bus.queue_icache_prefill(0x00010000, 0x22222222); // At boundary (inclusive, still inside)
+        assert_eq!(bus.drain_icache_prefill_queue().len(), 2);
+
+        bus.queue_icache_prefill(0x00010001, 0x33333333); // Past boundary (outside)
+        assert_eq!(bus.drain_icache_prefill_queue().len(), 0);
+    }
+
+    #[test]
+    fn test_icache_prefill_queue_multiple_instructions() {
+        let mut bus = Bus::new();
+
+        // Queue multiple instructions
+        bus.queue_icache_prefill(0x00000100, 0x11111111);
+        bus.queue_icache_prefill(0x00000200, 0x22222222);
+        bus.queue_icache_prefill(0x00000300, 0x33333333);
+
+        // Should have 6 entries (2 aliases per instruction)
+        let queue = bus.drain_icache_prefill_queue();
+        assert_eq!(queue.len(), 6);
+
+        // After draining, queue should be empty
+        assert_eq!(bus.drain_icache_prefill_queue().len(), 0);
+    }
+
+    #[test]
+    fn test_icache_prefill_queue_drain_clears() {
+        let mut bus = Bus::new();
+
+        bus.queue_icache_prefill(0x00000100, 0x12345678);
+        assert_eq!(bus.drain_icache_prefill_queue().len(), 2);
+
+        // Second drain should be empty
+        assert_eq!(bus.drain_icache_prefill_queue().len(), 0);
+    }
+
+    #[test]
+    fn test_icache_invalidation_queue_basic() {
+        let mut bus = Bus::new();
+
+        // Initially empty
+        assert_eq!(bus.drain_icache_invalidate_queue().len(), 0);
+
+        // Queue an address for invalidation
+        bus.queue_icache_invalidation(0x00000500);
+
+        // Should have queued both cached and uncached aliases
+        let queue = bus.drain_icache_invalidate_queue();
+        assert_eq!(queue.len(), 2);
+
+        // Check that both aliases are present
+        assert!(queue.contains(&0x80000500)); // KSEG0 cached
+        assert!(queue.contains(&0x00000500)); // KUSEG
+    }
+
+    #[test]
+    fn test_icache_invalidation_queue_multiple_addresses() {
+        let mut bus = Bus::new();
+
+        // Queue multiple addresses
+        bus.queue_icache_invalidation(0x00000100);
+        bus.queue_icache_invalidation(0x00000200);
+        bus.queue_icache_invalidation(0x00000300);
+
+        // Should have 6 entries (2 aliases per address)
+        let queue = bus.drain_icache_invalidate_queue();
+        assert_eq!(queue.len(), 6);
+
+        // Verify some addresses
+        assert!(queue.contains(&0x80000100));
+        assert!(queue.contains(&0x00000100));
+        assert!(queue.contains(&0x80000200));
+        assert!(queue.contains(&0x00000200));
+    }
+
+    #[test]
+    fn test_icache_invalidation_queue_drain_clears() {
+        let mut bus = Bus::new();
+
+        bus.queue_icache_invalidation(0x00000100);
+        assert_eq!(bus.drain_icache_invalidate_queue().len(), 2);
+
+        // Second drain should be empty
+        assert_eq!(bus.drain_icache_invalidate_queue().len(), 0);
+    }
+
+    #[test]
+    fn test_icache_invalidation_queue_all_ram_addresses() {
+        let mut bus = Bus::new();
+
+        // Test at various RAM addresses
+        bus.queue_icache_invalidation(0x00000000); // Start of RAM
+        bus.queue_icache_invalidation(0x00100000); // Middle of RAM
+        bus.queue_icache_invalidation(0x001FFFFC); // Near end of RAM
+
+        let queue = bus.drain_icache_invalidate_queue();
+        assert_eq!(queue.len(), 6);
+    }
+
+    #[test]
+    fn test_icache_range_invalidation_basic() {
+        let mut bus = Bus::new();
+
+        // Initially empty
+        assert_eq!(bus.drain_icache_invalidate_range_queue().len(), 0);
+
+        // Queue a range for invalidation
+        bus.queue_icache_range_invalidation(0x00000500, 0x00000600);
+
+        // Should have queued both cached and uncached aliases
+        let queue = bus.drain_icache_invalidate_range_queue();
+        assert_eq!(queue.len(), 2);
+
+        // Check that both range aliases are present
+        assert!(queue.contains(&(0x80000500, 0x80000600))); // KSEG0 cached
+        assert!(queue.contains(&(0x00000500, 0x00000600))); // KUSEG
+    }
+
+    #[test]
+    fn test_icache_range_invalidation_multiple_ranges() {
+        let mut bus = Bus::new();
+
+        // Queue multiple ranges
+        bus.queue_icache_range_invalidation(0x00000100, 0x00000200);
+        bus.queue_icache_range_invalidation(0x00010000, 0x00020000);
+        bus.queue_icache_range_invalidation(0x00100000, 0x00110000);
+
+        // Should have 6 entries (2 aliases per range)
+        let queue = bus.drain_icache_invalidate_range_queue();
+        assert_eq!(queue.len(), 6);
+    }
+
+    #[test]
+    fn test_icache_range_invalidation_drain_clears() {
+        let mut bus = Bus::new();
+
+        bus.queue_icache_range_invalidation(0x00000100, 0x00000200);
+        assert_eq!(bus.drain_icache_invalidate_range_queue().len(), 2);
+
+        // Second drain should be empty
+        assert_eq!(bus.drain_icache_invalidate_range_queue().len(), 0);
+    }
+
+    #[test]
+    fn test_icache_range_invalidation_large_range() {
+        let mut bus = Bus::new();
+
+        // Invalidate a large range (e.g., executable load)
+        bus.queue_icache_range_invalidation(0x00010000, 0x00080000);
+
+        let queue = bus.drain_icache_invalidate_range_queue();
+        assert_eq!(queue.len(), 2);
+
+        // Verify ranges
+        assert!(queue.contains(&(0x80010000, 0x80080000)));
+        assert!(queue.contains(&(0x00010000, 0x00080000)));
+    }
+
+    #[test]
+    fn test_icache_range_invalidation_single_instruction() {
+        let mut bus = Bus::new();
+
+        // Invalidate a single instruction (4 bytes)
+        bus.queue_icache_range_invalidation(0x00000100, 0x00000104);
+
+        let queue = bus.drain_icache_invalidate_range_queue();
+        assert_eq!(queue.len(), 2);
+
+        assert!(queue.contains(&(0x80000100, 0x80000104)));
+        assert!(queue.contains(&(0x00000100, 0x00000104)));
+    }
+
+    #[test]
+    fn test_icache_range_invalidation_zero_length() {
+        let mut bus = Bus::new();
+
+        // Invalidate zero-length range (start == end)
+        bus.queue_icache_range_invalidation(0x00000100, 0x00000100);
+
+        let queue = bus.drain_icache_invalidate_range_queue();
+        assert_eq!(queue.len(), 2);
+
+        // Even zero-length ranges should be queued
+        assert!(queue.contains(&(0x80000100, 0x80000100)));
+        assert!(queue.contains(&(0x00000100, 0x00000100)));
+    }
+
+    #[test]
+    fn test_icache_all_queues_independent() {
+        let mut bus = Bus::new();
+
+        // Queue to all three queues
+        bus.queue_icache_prefill(0x00000100, 0x11111111);
+        bus.queue_icache_invalidation(0x00000200);
+        bus.queue_icache_range_invalidation(0x00000300, 0x00000400);
+
+        // Each queue should have its own entries
+        assert_eq!(bus.drain_icache_prefill_queue().len(), 2);
+        assert_eq!(bus.drain_icache_invalidate_queue().len(), 2);
+        assert_eq!(bus.drain_icache_invalidate_range_queue().len(), 2);
+
+        // All queues should now be empty
+        assert_eq!(bus.drain_icache_prefill_queue().len(), 0);
+        assert_eq!(bus.drain_icache_invalidate_queue().len(), 0);
+        assert_eq!(bus.drain_icache_invalidate_range_queue().len(), 0);
+    }
+
+    #[test]
+    fn test_icache_queues_after_reset() {
+        let mut bus = Bus::new();
+
+        // Queue some entries
+        bus.queue_icache_prefill(0x00000100, 0x11111111);
+        bus.queue_icache_invalidation(0x00000200);
+        bus.queue_icache_range_invalidation(0x00000300, 0x00000400);
+
+        // Reset should clear all queues
+        bus.reset();
+
+        // All queues should be empty after reset
+        assert_eq!(bus.drain_icache_prefill_queue().len(), 0);
+        assert_eq!(bus.drain_icache_invalidate_queue().len(), 0);
+        assert_eq!(bus.drain_icache_invalidate_range_queue().len(), 0);
+    }
+
+    #[test]
+    fn test_ram_mut_basic() {
+        let mut bus = Bus::new();
+
+        // Get mutable reference to RAM
+        let ram = bus.ram_mut();
+
+        // Write some data
+        ram[0] = 0x42;
+        ram[1] = 0x43;
+        ram[100] = 0xFF;
+
+        // Verify data was written
+        assert_eq!(ram[0], 0x42);
+        assert_eq!(ram[1], 0x43);
+        assert_eq!(ram[100], 0xFF);
+    }
+
+    #[test]
+    fn test_ram_mut_size() {
+        let mut bus = Bus::new();
+
+        // RAM should be 2MB
+        let ram = bus.ram_mut();
+        assert_eq!(ram.len(), 2 * 1024 * 1024);
+    }
+
+    #[test]
+    fn test_ram_mut_full_range() {
+        let mut bus = Bus::new();
+
+        let ram = bus.ram_mut();
+
+        // Write to start and end of RAM
+        ram[0] = 0x11;
+        ram[ram.len() - 1] = 0x22;
+
+        assert_eq!(ram[0], 0x11);
+        assert_eq!(ram[ram.len() - 1], 0x22);
+    }
+
+    #[test]
+    fn test_ram_mut_bulk_write() {
+        let mut bus = Bus::new();
+
+        let ram = bus.ram_mut();
+
+        // Write a pattern
+        for (i, item) in ram.iter_mut().enumerate().take(100) {
+            *item = (i % 256) as u8;
+        }
+
+        // Verify pattern
+        for (i, item) in ram.iter().enumerate().take(100) {
+            assert_eq!(*item, (i % 256) as u8);
+        }
+    }
+
+    #[test]
+    fn test_icache_prefill_with_instruction_values() {
+        let mut bus = Bus::new();
+
+        // Queue various MIPS instructions
+        bus.queue_icache_prefill(0x00000000, 0x00000000); // NOP
+        bus.queue_icache_prefill(0x00000004, 0x3C080001); // LUI $t0, 0x0001
+        bus.queue_icache_prefill(0x00000008, 0x8D090000); // LW $t1, 0($t0)
+        bus.queue_icache_prefill(0x0000000C, 0xAD0A0004); // SW $t2, 4($t0)
+
+        let queue = bus.drain_icache_prefill_queue();
+
+        // 4 instructions × 2 aliases = 8 entries
+        assert_eq!(queue.len(), 8);
+
+        // Verify specific entries
+        assert!(queue.contains(&(0x80000000, 0x00000000)));
+        assert!(queue.contains(&(0x00000000, 0x00000000)));
+        assert!(queue.contains(&(0x80000004, 0x3C080001)));
+        assert!(queue.contains(&(0x00000004, 0x3C080001)));
+    }
+
+    #[test]
+    fn test_icache_edge_case_addresses() {
+        let mut bus = Bus::new();
+
+        // Test at 4-byte boundaries (instruction alignment)
+        for addr in [0x0000, 0x0004, 0x0008, 0x000C, 0x0010] {
+            bus.queue_icache_prefill(addr, 0xDEADBEEF);
+        }
+
+        let queue = bus.drain_icache_prefill_queue();
+        assert_eq!(queue.len(), 10); // 5 instructions × 2 aliases
+    }
+
+    #[test]
+    fn test_icache_unaligned_addresses() {
+        let mut bus = Bus::new();
+
+        // PSX requires 4-byte aligned instruction fetches, but the cache
+        // system should handle any address for generality
+        bus.queue_icache_prefill(0x00000001, 0x12345678); // Unaligned
+        bus.queue_icache_prefill(0x00000003, 0xABCDEF00); // Unaligned
+
+        let queue = bus.drain_icache_prefill_queue();
+        assert_eq!(queue.len(), 4); // 2 instructions × 2 aliases
+    }
+}

@@ -157,3 +157,608 @@ impl GPU {
         );
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::core::gpu::TextureDepth;
+
+    #[test]
+    fn test_textured_triangle_basic() {
+        let mut gpu = GPU::new();
+
+        // Set up a simple texture in VRAM first
+        for y in 0..16 {
+            for x in 0..16 {
+                gpu.write_vram(x, y, 0x7FFF); // White texture
+            }
+        }
+
+        let vertices = [
+            Vertex { x: 100, y: 100 },
+            Vertex { x: 200, y: 100 },
+            Vertex { x: 150, y: 200 },
+        ];
+        let texcoords = [
+            TexCoord { u: 0, v: 0 },
+            TexCoord { u: 15, v: 0 },
+            TexCoord { u: 7, v: 15 },
+        ];
+        let texture_info = TextureInfo {
+            page_x: 0,
+            page_y: 0,
+            clut_x: 0,
+            clut_y: 0,
+            depth: TextureDepth::T15Bit,
+        };
+        let color = Color {
+            r: 128,
+            g: 128,
+            b: 128,
+        }; // Normal brightness
+
+        gpu.render_textured_triangle(&vertices, &texcoords, &texture_info, &color, false);
+
+        // Check center pixel has texture data
+        let pixel = gpu.read_vram(150, 133);
+        assert_ne!(pixel, 0x0000);
+    }
+
+    #[test]
+    fn test_textured_triangle_with_drawing_offset() {
+        let mut gpu = GPU::new();
+
+        // Set up texture
+        for y in 0..16 {
+            for x in 0..16 {
+                gpu.write_vram(x, y, 0x001F); // Red texture
+            }
+        }
+
+        gpu.draw_offset = (50, 30);
+
+        let vertices = [
+            Vertex { x: 100, y: 100 },
+            Vertex { x: 200, y: 100 },
+            Vertex { x: 150, y: 200 },
+        ];
+        let texcoords = [
+            TexCoord { u: 0, v: 0 },
+            TexCoord { u: 15, v: 0 },
+            TexCoord { u: 7, v: 15 },
+        ];
+        let texture_info = TextureInfo {
+            page_x: 0,
+            page_y: 0,
+            clut_x: 0,
+            clut_y: 0,
+            depth: TextureDepth::T15Bit,
+        };
+        let color = Color {
+            r: 128,
+            g: 128,
+            b: 128,
+        };
+
+        gpu.render_textured_triangle(&vertices, &texcoords, &texture_info, &color, false);
+
+        // Center should be at (150+50, 133+30) = (200, 163)
+        let pixel = gpu.read_vram(200, 163);
+        assert_ne!(pixel, 0x0000);
+    }
+
+    #[test]
+    fn test_textured_triangle_color_modulation() {
+        let mut gpu = GPU::new();
+
+        // Set up white texture
+        for y in 0..16 {
+            for x in 0..16 {
+                gpu.write_vram(x, y, 0x7FFF); // White
+            }
+        }
+
+        let vertices = [
+            Vertex { x: 100, y: 100 },
+            Vertex { x: 200, y: 100 },
+            Vertex { x: 150, y: 200 },
+        ];
+        let texcoords = [
+            TexCoord { u: 0, v: 0 },
+            TexCoord { u: 15, v: 0 },
+            TexCoord { u: 7, v: 15 },
+        ];
+        let texture_info = TextureInfo {
+            page_x: 0,
+            page_y: 0,
+            clut_x: 0,
+            clut_y: 0,
+            depth: TextureDepth::T15Bit,
+        };
+
+        // Per PSX-SPX: (128,128,128) = normal brightness
+        // Lower values darken, higher values brighten (with saturation)
+        let color = Color {
+            r: 128,
+            g: 128,
+            b: 128,
+        };
+
+        gpu.render_textured_triangle(&vertices, &texcoords, &texture_info, &color, false);
+
+        let pixel = gpu.read_vram(150, 133);
+        // Modulation formula: (texel * color) / 128
+        // White (31,31,31) * 128 / 128 = (31,31,31)
+        assert_ne!(pixel, 0x0000);
+    }
+
+    #[test]
+    fn test_textured_triangle_texture_coordinates() {
+        let mut gpu = GPU::new();
+
+        // Set up gradient texture
+        for y in 0..256u16 {
+            for x in 0..256u16 {
+                let color = ((y >> 3) << 10) | ((x >> 3) << 5) | (x >> 3);
+                gpu.write_vram(x, y, color);
+            }
+        }
+
+        let vertices = [
+            Vertex { x: 100, y: 100 },
+            Vertex { x: 200, y: 100 },
+            Vertex { x: 150, y: 200 },
+        ];
+
+        // Per PSX-SPX: Texture coordinates are 8-bit (0-255)
+        let texcoords = [
+            TexCoord { u: 0, v: 0 },
+            TexCoord { u: 255, v: 0 },
+            TexCoord { u: 128, v: 255 },
+        ];
+
+        let texture_info = TextureInfo {
+            page_x: 0,
+            page_y: 0,
+            clut_x: 0,
+            clut_y: 0,
+            depth: TextureDepth::T15Bit,
+        };
+        let color = Color {
+            r: 128,
+            g: 128,
+            b: 128,
+        };
+
+        gpu.render_textured_triangle(&vertices, &texcoords, &texture_info, &color, false);
+
+        // Should render with full U/V range
+        let pixel = gpu.read_vram(150, 133);
+        assert_ne!(pixel, 0x0000);
+    }
+
+    #[test]
+    fn test_textured_quad_basic() {
+        let mut gpu = GPU::new();
+
+        // Set up texture
+        for y in 0..32 {
+            for x in 0..32 {
+                gpu.write_vram(x, y, 0x03E0); // Green texture
+            }
+        }
+
+        let vertices = [
+            Vertex { x: 100, y: 100 },
+            Vertex { x: 200, y: 100 },
+            Vertex { x: 200, y: 200 },
+            Vertex { x: 100, y: 200 },
+        ];
+        let texcoords = [
+            TexCoord { u: 0, v: 0 },
+            TexCoord { u: 31, v: 0 },
+            TexCoord { u: 31, v: 31 },
+            TexCoord { u: 0, v: 31 },
+        ];
+        let texture_info = TextureInfo {
+            page_x: 0,
+            page_y: 0,
+            clut_x: 0,
+            clut_y: 0,
+            depth: TextureDepth::T15Bit,
+        };
+        let color = Color {
+            r: 128,
+            g: 128,
+            b: 128,
+        };
+
+        gpu.render_textured_quad(&vertices, &texcoords, &texture_info, &color, false);
+
+        // Center should have green texture
+        let pixel = gpu.read_vram(150, 150);
+        assert_ne!(pixel, 0x0000);
+    }
+
+    #[test]
+    fn test_textured_quad_decomposition() {
+        let mut gpu = GPU::new();
+
+        // Set up texture
+        for y in 0..16 {
+            for x in 0..16 {
+                gpu.write_vram(x, y, 0x7C00); // Blue texture
+            }
+        }
+
+        // Per implementation: Quad splits into (v0,v1,v2) and (v1,v2,v3)
+        let vertices = [
+            Vertex { x: 100, y: 100 },
+            Vertex { x: 200, y: 100 },
+            Vertex { x: 200, y: 200 },
+            Vertex { x: 100, y: 200 },
+        ];
+        let texcoords = [
+            TexCoord { u: 0, v: 0 },
+            TexCoord { u: 15, v: 0 },
+            TexCoord { u: 15, v: 15 },
+            TexCoord { u: 0, v: 15 },
+        ];
+        let texture_info = TextureInfo {
+            page_x: 0,
+            page_y: 0,
+            clut_x: 0,
+            clut_y: 0,
+            depth: TextureDepth::T15Bit,
+        };
+        let color = Color {
+            r: 128,
+            g: 128,
+            b: 128,
+        };
+
+        gpu.render_textured_quad(&vertices, &texcoords, &texture_info, &color, false);
+
+        // Check both triangle areas
+        assert_ne!(gpu.read_vram(150, 120), 0x0000); // Upper triangle
+        assert_ne!(gpu.read_vram(120, 180), 0x0000); // Lower triangle
+    }
+
+    #[test]
+    fn test_textured_triangle_texture_page() {
+        let mut gpu = GPU::new();
+
+        // Per PSX-SPX: Texture page X base is N×64, Y base is 0 or 256
+        // Set up texture at page (1, 0) = (64, 0)
+        for y in 0..16 {
+            for x in 64..80 {
+                gpu.write_vram(x, y, 0x7FFF); // White
+            }
+        }
+
+        let vertices = [
+            Vertex { x: 100, y: 100 },
+            Vertex { x: 200, y: 100 },
+            Vertex { x: 150, y: 200 },
+        ];
+        let texcoords = [
+            TexCoord { u: 0, v: 0 },
+            TexCoord { u: 15, v: 0 },
+            TexCoord { u: 7, v: 15 },
+        ];
+        let texture_info = TextureInfo {
+            page_x: 64, // Page X = 64
+            page_y: 0,  // Page Y = 0
+            clut_x: 0,
+            clut_y: 0,
+            depth: TextureDepth::T15Bit,
+        };
+        let color = Color {
+            r: 128,
+            g: 128,
+            b: 128,
+        };
+
+        gpu.render_textured_triangle(&vertices, &texcoords, &texture_info, &color, false);
+
+        let pixel = gpu.read_vram(150, 133);
+        assert_ne!(pixel, 0x0000);
+    }
+
+    #[test]
+    fn test_textured_triangle_4bit_texture() {
+        let mut gpu = GPU::new();
+
+        // Per PSX-SPX: 4-bit textures use 16-color CLUT
+        // Set up CLUT at (0, 0)
+        for i in 0..16u16 {
+            let color = (i << 10) | (i << 5) | i; // Grayscale CLUT
+            gpu.write_vram(i, 0, color);
+        }
+
+        // Set up 4-bit texture data
+        for y in 0..16 {
+            for x in 0..16 {
+                gpu.write_vram(64 + x, y, 0x0000); // 4-bit indices
+            }
+        }
+
+        let vertices = [
+            Vertex { x: 100, y: 100 },
+            Vertex { x: 200, y: 100 },
+            Vertex { x: 150, y: 200 },
+        ];
+        let texcoords = [
+            TexCoord { u: 0, v: 0 },
+            TexCoord { u: 15, v: 0 },
+            TexCoord { u: 7, v: 15 },
+        ];
+        let texture_info = TextureInfo {
+            page_x: 64, // Page at 64
+            page_y: 0,
+            clut_x: 0,
+            clut_y: 0,
+            depth: TextureDepth::T4Bit,
+        };
+        let color = Color {
+            r: 128,
+            g: 128,
+            b: 128,
+        };
+
+        gpu.render_textured_triangle(&vertices, &texcoords, &texture_info, &color, false);
+    }
+
+    #[test]
+    fn test_textured_triangle_8bit_texture() {
+        let mut gpu = GPU::new();
+
+        // Per PSX-SPX: 8-bit textures use 256-color CLUT
+        // Set up CLUT at (0, 1)
+        for i in 0..256u16 {
+            let r = i & 0x1F;
+            let g = (i >> 3) & 0x1F;
+            let b = (i >> 6) & 0x1F;
+            let color = (b << 10) | (g << 5) | r;
+            gpu.write_vram(i % 16, 1 + (i / 16), color);
+        }
+
+        // Set up 8-bit texture data
+        for y in 0..16 {
+            for x in 0..16 {
+                gpu.write_vram(128 + x, y, 0x0000); // 8-bit indices
+            }
+        }
+
+        let vertices = [
+            Vertex { x: 100, y: 100 },
+            Vertex { x: 200, y: 100 },
+            Vertex { x: 150, y: 200 },
+        ];
+        let texcoords = [
+            TexCoord { u: 0, v: 0 },
+            TexCoord { u: 15, v: 0 },
+            TexCoord { u: 7, v: 15 },
+        ];
+        let texture_info = TextureInfo {
+            page_x: 128, // Page at 128
+            page_y: 0,
+            clut_x: 0,
+            clut_y: 1,
+            depth: TextureDepth::T8Bit,
+        };
+        let color = Color {
+            r: 128,
+            g: 128,
+            b: 128,
+        };
+
+        gpu.render_textured_triangle(&vertices, &texcoords, &texture_info, &color, false);
+    }
+
+    #[test]
+    fn test_textured_triangle_negative_coordinates() {
+        let mut gpu = GPU::new();
+
+        // Set up texture
+        for y in 0..16 {
+            for x in 0..16 {
+                gpu.write_vram(x, y, 0x7FFF);
+            }
+        }
+
+        let vertices = [
+            Vertex { x: -50, y: -50 },
+            Vertex { x: 100, y: -50 },
+            Vertex { x: 25, y: 100 },
+        ];
+        let texcoords = [
+            TexCoord { u: 0, v: 0 },
+            TexCoord { u: 15, v: 0 },
+            TexCoord { u: 7, v: 15 },
+        ];
+        let texture_info = TextureInfo {
+            page_x: 0,
+            page_y: 0,
+            clut_x: 0,
+            clut_y: 0,
+            depth: TextureDepth::T15Bit,
+        };
+        let color = Color {
+            r: 128,
+            g: 128,
+            b: 128,
+        };
+
+        // Should handle wrapping
+        gpu.render_textured_triangle(&vertices, &texcoords, &texture_info, &color, false);
+    }
+
+    #[test]
+    fn test_textured_triangle_boundary_coordinates() {
+        let mut gpu = GPU::new();
+
+        // Set up large texture area
+        for y in 0..512 {
+            for x in 0..1024 {
+                gpu.write_vram(x, y, 0x7FFF);
+            }
+        }
+
+        let vertices = [
+            Vertex { x: 0, y: 0 },
+            Vertex { x: 1023, y: 0 },
+            Vertex { x: 512, y: 511 },
+        ];
+        let texcoords = [
+            TexCoord { u: 0, v: 0 },
+            TexCoord { u: 255, v: 0 },
+            TexCoord { u: 128, v: 255 },
+        ];
+        let texture_info = TextureInfo {
+            page_x: 0,
+            page_y: 0,
+            clut_x: 0,
+            clut_y: 0,
+            depth: TextureDepth::T15Bit,
+        };
+        let color = Color {
+            r: 128,
+            g: 128,
+            b: 128,
+        };
+
+        gpu.render_textured_triangle(&vertices, &texcoords, &texture_info, &color, false);
+    }
+
+    #[test]
+    fn test_textured_quad_with_offset() {
+        let mut gpu = GPU::new();
+
+        // Set up texture
+        for y in 0..16 {
+            for x in 0..16 {
+                gpu.write_vram(x, y, 0x7FFF);
+            }
+        }
+
+        gpu.draw_offset = (100, 50);
+
+        let vertices = [
+            Vertex { x: 50, y: 50 },
+            Vertex { x: 150, y: 50 },
+            Vertex { x: 150, y: 150 },
+            Vertex { x: 50, y: 150 },
+        ];
+        let texcoords = [
+            TexCoord { u: 0, v: 0 },
+            TexCoord { u: 15, v: 0 },
+            TexCoord { u: 15, v: 15 },
+            TexCoord { u: 0, v: 15 },
+        ];
+        let texture_info = TextureInfo {
+            page_x: 0,
+            page_y: 0,
+            clut_x: 0,
+            clut_y: 0,
+            depth: TextureDepth::T15Bit,
+        };
+        let color = Color {
+            r: 128,
+            g: 128,
+            b: 128,
+        };
+
+        gpu.render_textured_quad(&vertices, &texcoords, &texture_info, &color, false);
+
+        // Center should be at (100+100, 100+50) = (200, 150)
+        let pixel = gpu.read_vram(200, 150);
+        assert_ne!(pixel, 0x0000);
+    }
+
+    #[test]
+    fn test_textured_triangle_darken_modulation() {
+        let mut gpu = GPU::new();
+
+        // Set up white texture
+        for y in 0..16 {
+            for x in 0..16 {
+                gpu.write_vram(x, y, 0x7FFF); // White
+            }
+        }
+
+        let vertices = [
+            Vertex { x: 100, y: 100 },
+            Vertex { x: 200, y: 100 },
+            Vertex { x: 150, y: 200 },
+        ];
+        let texcoords = [
+            TexCoord { u: 0, v: 0 },
+            TexCoord { u: 15, v: 0 },
+            TexCoord { u: 7, v: 15 },
+        ];
+        let texture_info = TextureInfo {
+            page_x: 0,
+            page_y: 0,
+            clut_x: 0,
+            clut_y: 0,
+            depth: TextureDepth::T15Bit,
+        };
+
+        // Per PSX-SPX: Values < 128 darken the texture
+        let color = Color {
+            r: 64,
+            g: 64,
+            b: 64,
+        }; // Half brightness
+
+        gpu.render_textured_triangle(&vertices, &texcoords, &texture_info, &color, false);
+
+        let pixel = gpu.read_vram(150, 133);
+        // Should be darker than original white texture
+        assert!(pixel < 0x7FFF);
+    }
+
+    #[test]
+    fn test_textured_triangle_brighten_modulation() {
+        let mut gpu = GPU::new();
+
+        // Set up gray texture
+        for y in 0..16 {
+            for x in 0..16 {
+                gpu.write_vram(x, y, 0x4210); // Medium gray
+            }
+        }
+
+        let vertices = [
+            Vertex { x: 100, y: 100 },
+            Vertex { x: 200, y: 100 },
+            Vertex { x: 150, y: 200 },
+        ];
+        let texcoords = [
+            TexCoord { u: 0, v: 0 },
+            TexCoord { u: 15, v: 0 },
+            TexCoord { u: 7, v: 15 },
+        ];
+        let texture_info = TextureInfo {
+            page_x: 0,
+            page_y: 0,
+            clut_x: 0,
+            clut_y: 0,
+            depth: TextureDepth::T15Bit,
+        };
+
+        // Per PSX-SPX: Values > 128 brighten the texture
+        let color = Color {
+            r: 255,
+            g: 255,
+            b: 255,
+        }; // Maximum brightness
+
+        gpu.render_textured_triangle(&vertices, &texcoords, &texture_info, &color, false);
+
+        let pixel = gpu.read_vram(150, 133);
+        // Should be brighter (clamped to max)
+        assert_ne!(pixel, 0x0000);
+    }
+}

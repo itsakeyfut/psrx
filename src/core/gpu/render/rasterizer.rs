@@ -2503,4 +2503,403 @@ mod tests {
         assert_eq!(vram[99 * 1024 + 100], 0);
         assert_eq!(vram[130 * 1024 + 100], 0);
     }
+
+    // ===== Additional Edge Case Tests Based on PSX-SPX =====
+
+    #[test]
+    fn test_coordinate_wrapping_negative() {
+        let mut vram = vec![0u16; 1024 * 512];
+        let mut rasterizer = Rasterizer::new();
+
+        // Per PSX-SPX: Negative coordinates wrap around
+        // Should not crash with extreme negative values
+        rasterizer.draw_triangle(
+            &mut vram,
+            (-5000, -5000),
+            (-4000, -4000),
+            (-4500, -4000),
+            0x7FFF,
+        );
+    }
+
+    #[test]
+    fn test_coordinate_wrapping_large_positive() {
+        let mut vram = vec![0u16; 1024 * 512];
+        let mut rasterizer = Rasterizer::new();
+
+        // Per PSX-SPX: Large positive coordinates wrap around
+        rasterizer.draw_triangle(
+            &mut vram,
+            (10000, 10000),
+            (11000, 11000),
+            (10500, 11000),
+            0x7FFF,
+        );
+    }
+
+    #[test]
+    fn test_maximum_triangle_dimensions() {
+        let mut vram = vec![0u16; 1024 * 512];
+        let mut rasterizer = Rasterizer::new();
+
+        // Per PSX-SPX: Maximum vertex distance is 1023 horizontal, 511 vertical
+        rasterizer.draw_triangle(&mut vram, (0, 0), (1023, 0), (512, 511), 0x7FFF);
+
+        // Check corners are drawn
+        assert_ne!(vram[0], 0);
+    }
+
+    #[test]
+    fn test_line_single_pixel() {
+        let mut vram = vec![0u16; 1024 * 512];
+        let mut rasterizer = Rasterizer::new();
+
+        // Per PSX-SPX: Zero-length line should draw a single pixel
+        rasterizer.draw_line(&mut vram, 100, 100, 100, 100, 0x7FFF);
+
+        assert_ne!(vram[100 * 1024 + 100], 0);
+    }
+
+    #[test]
+    fn test_line_steep_slope() {
+        let mut vram = vec![0u16; 1024 * 512];
+        let mut rasterizer = Rasterizer::new();
+
+        // Steep line (more vertical than horizontal)
+        rasterizer.draw_line(&mut vram, 100, 10, 110, 200, 0x7FFF);
+
+        // Check start and end
+        assert_ne!(vram[10 * 1024 + 100], 0);
+        assert_ne!(vram[200 * 1024 + 110], 0);
+    }
+
+    #[test]
+    fn test_line_shallow_slope() {
+        let mut vram = vec![0u16; 1024 * 512];
+        let mut rasterizer = Rasterizer::new();
+
+        // Shallow line (more horizontal than vertical)
+        rasterizer.draw_line(&mut vram, 10, 100, 200, 110, 0x7FFF);
+
+        // Check start and end
+        assert_ne!(vram[100 * 1024 + 10], 0);
+        assert_ne!(vram[110 * 1024 + 200], 0);
+    }
+
+    #[test]
+    fn test_line_all_octants() {
+        let mut vram = vec![0u16; 1024 * 512];
+        let mut rasterizer = Rasterizer::new();
+
+        let center = (512i16, 256i16);
+        let radius = 100i16;
+
+        // Test lines in all 8 octants
+        let angles = [0.0f32, 45.0, 90.0, 135.0, 180.0, 225.0, 270.0, 315.0];
+
+        for angle in angles {
+            let rad = angle.to_radians();
+            let dx = (radius as f32 * rad.cos()) as i16;
+            let dy = (radius as f32 * rad.sin()) as i16;
+
+            rasterizer.draw_line(
+                &mut vram,
+                center.0,
+                center.1,
+                center.0 + dx,
+                center.1 + dy,
+                0x7FFF,
+            );
+        }
+
+        // Center should definitely be drawn
+        assert_ne!(vram[256 * 1024 + 512], 0);
+    }
+
+    #[test]
+    fn test_gradient_line_color_interpolation() {
+        let mut vram = vec![0u16; 1024 * 512];
+        let mut rasterizer = Rasterizer::new();
+
+        // Per PSX-SPX: Gouraud shading interpolates colors
+        rasterizer.draw_gradient_line(&mut vram, 100, 100, (0, 0, 0), 200, 100, (248, 248, 248));
+
+        // Start should be black
+        assert_eq!(vram[100 * 1024 + 100], 0x0000);
+
+        // End should be near white
+        let end_pixel = vram[100 * 1024 + 200];
+        assert!(end_pixel > 0x7000);
+
+        // Middle should be interpolated
+        let mid_pixel = vram[100 * 1024 + 150];
+        assert!(mid_pixel > 0x0000 && mid_pixel < 0x7FFF);
+    }
+
+    #[test]
+    fn test_blend_mode_all_zeros() {
+        use crate::core::gpu::BlendMode;
+
+        let bg = 0x0000; // Black
+        let fg = 0x0000; // Black
+
+        // All blend modes with black should produce black
+        assert_eq!(BlendMode::Average.blend(bg, fg), 0x0000);
+        assert_eq!(BlendMode::Additive.blend(bg, fg), 0x0000);
+        assert_eq!(BlendMode::Subtractive.blend(bg, fg), 0x0000);
+        assert_eq!(BlendMode::AddQuarter.blend(bg, fg), 0x0000);
+    }
+
+    #[test]
+    fn test_blend_mode_all_max() {
+        use crate::core::gpu::BlendMode;
+
+        let bg = 0x7FFF; // White
+        let fg = 0x7FFF; // White
+
+        // Average: (31+31)/2 = 31
+        assert_eq!(BlendMode::Average.blend(bg, fg), 0x7FFF);
+
+        // Additive: 31+31 clamped to 31
+        assert_eq!(BlendMode::Additive.blend(bg, fg), 0x7FFF);
+
+        // Subtractive: 31-31 = 0
+        assert_eq!(BlendMode::Subtractive.blend(bg, fg), 0x0000);
+
+        // AddQuarter: 31+(31/4) = 31+7 clamped to 31
+        assert_eq!(BlendMode::AddQuarter.blend(bg, fg), 0x7FFF);
+    }
+
+    #[test]
+    fn test_texture_coordinate_wrapping() {
+        use crate::core::gpu::{TextureDepth, TextureInfo};
+
+        let mut vram = vec![0u16; 1024 * 512];
+        let rasterizer = Rasterizer::new();
+
+        // Setup texture pattern
+        vram[64] = 0x7FFF; // White at (0, 0) in page
+        vram[65] = 0x001F; // Red at (1, 0) in page
+
+        let info = TextureInfo {
+            page_x: 64,
+            page_y: 0,
+            clut_x: 0,
+            clut_y: 0,
+            depth: TextureDepth::T15Bit,
+        };
+
+        // Test that coordinates at 0 and 255 access different locations
+        let color_0 = rasterizer.sample_15bit_texture(&vram, 0, 0, &info);
+        let color_1 = rasterizer.sample_15bit_texture(&vram, 1, 0, &info);
+        assert_ne!(color_0, color_1);
+    }
+
+    #[test]
+    fn test_barycentric_edge_cases() {
+        // Test with degenerate triangle (area = 0)
+        let v0 = (0, 0);
+        let v1 = (10, 0);
+        let v2 = (20, 0); // Colinear
+
+        let (w0, w1, w2) = Rasterizer::barycentric(10, 0, v0, v1, v2);
+
+        // Should not crash, weights should sum to approximately 1 or handle gracefully
+        let sum = w0 + w1 + w2;
+        // For degenerate triangle, implementation may return (0,0,0) or other values
+        assert!(sum.is_nan() || sum.is_infinite() || sum.abs() < 2.0);
+    }
+
+    #[test]
+    fn test_gradient_triangle_high_contrast() {
+        let mut vram = vec![0u16; 1024 * 512];
+        let mut rasterizer = Rasterizer::new();
+
+        // High contrast gradient: black to white
+        rasterizer.draw_gradient_triangle(
+            &mut vram,
+            (100, 100),
+            (0, 0, 0), // Black
+            (200, 100),
+            (0, 0, 0), // Black
+            (150, 200),
+            (255, 255, 255), // White
+        );
+
+        // Top edge should be black
+        assert_eq!(vram[100 * 1024 + 150], 0x0000);
+
+        // Bottom should be bright
+        let bottom_pixel = vram[190 * 1024 + 150];
+        assert!(bottom_pixel > 0x6000);
+    }
+
+    #[test]
+    fn test_clipping_at_exact_boundaries() {
+        let mut vram = vec![0u16; 1024 * 512];
+        let mut rasterizer = Rasterizer::new();
+        rasterizer.set_clip_rect(100, 100, 200, 200);
+
+        // Draw at exact clip boundaries
+        rasterizer.draw_triangle(&mut vram, (100, 100), (200, 100), (150, 200), 0x7FFF);
+
+        // Corner at (100, 100) should be drawn (inclusive)
+        assert_ne!(vram[100 * 1024 + 100], 0);
+
+        // Corner at (200, 200) behavior depends on clipping rule
+        // Per PSX-SPX: Polygons exclude lower-right boundary
+    }
+
+    #[test]
+    fn test_zero_size_rectangle() {
+        use super::super::super::primitives::Color;
+        use super::super::super::registers::{DrawMode, DrawingArea};
+
+        let mut vram = vec![0u16; 1024 * 512];
+        let mut rasterizer = Rasterizer::new();
+        let draw_mode = DrawMode::default();
+        let draw_area = DrawingArea {
+            left: 0,
+            top: 0,
+            right: 1023,
+            bottom: 511,
+        };
+
+        // Zero width rectangle
+        rasterizer.draw_rectangle(
+            &mut vram,
+            &draw_mode,
+            &draw_area,
+            (0, 0),
+            100,
+            100,
+            0, // width = 0
+            30,
+            &Color { r: 255, g: 0, b: 0 },
+            false,
+        );
+
+        // Should not draw anything
+        assert_eq!(vram[100 * 1024 + 100], 0);
+
+        // Zero height rectangle
+        rasterizer.draw_rectangle(
+            &mut vram,
+            &draw_mode,
+            &draw_area,
+            (0, 0),
+            100,
+            100,
+            30,
+            0, // height = 0
+            &Color { r: 255, g: 0, b: 0 },
+            false,
+        );
+
+        // Should not draw anything
+        assert_eq!(vram[100 * 1024 + 100], 0);
+    }
+
+    #[test]
+    fn test_polyline_many_vertices() {
+        let mut vram = vec![0u16; 1024 * 512];
+        let mut rasterizer = Rasterizer::new();
+
+        // Create a polyline with 100 vertices (zigzag pattern)
+        let mut points = Vec::new();
+        for i in 0..100 {
+            points.push((100 + (i * 5) as i16, 100 + ((i % 2) * 50) as i16));
+        }
+
+        rasterizer.draw_polyline(&mut vram, &points, 0x7FFF);
+
+        // Check that some pixels are drawn (polyline with 100 points should draw many pixels)
+        let drawn_count = vram.iter().filter(|&&p| p != 0).count();
+        assert!(
+            drawn_count > 100,
+            "Polyline should draw many pixels, but only drew {}",
+            drawn_count
+        );
+    }
+
+    #[test]
+    fn test_triangle_all_vertices_same_position() {
+        let mut vram = vec![0u16; 1024 * 512];
+        let mut rasterizer = Rasterizer::new();
+
+        // All vertices at same position
+        rasterizer.draw_triangle(&mut vram, (150, 150), (150, 150), (150, 150), 0x7FFF);
+
+        // May or may not draw a single pixel (implementation defined)
+        // Should not crash
+    }
+
+    #[test]
+    fn test_gradient_polyline_color_progression() {
+        let mut vram = vec![0u16; 1024 * 512];
+        let mut rasterizer = Rasterizer::new();
+
+        // Polyline from red to green to blue
+        let points = [(100, 100), (200, 100), (300, 100)];
+        let colors = [(255, 0, 0), (0, 255, 0), (0, 0, 255)];
+
+        rasterizer.draw_gradient_polyline(&mut vram, &points, &colors);
+
+        // First segment should transition from red to green
+        let pixel1 = vram[100 * 1024 + 150];
+        assert_ne!(pixel1, 0);
+
+        // Second segment should transition from green to blue
+        let pixel2 = vram[100 * 1024 + 250];
+        assert_ne!(pixel2, 0);
+    }
+
+    #[test]
+    fn test_rgb_conversion_precision() {
+        // Per PSX-SPX: 8-bit RGB (0-255) converts to 5-bit RGB (0-31)
+        // Formula: 5bit = 8bit >> 3
+
+        // Test boundary values
+        assert_eq!(Rasterizer::rgb_to_rgb15(0, 0, 0), 0x0000);
+        assert_eq!(Rasterizer::rgb_to_rgb15(255, 255, 255), 0x7FFF);
+
+        // Test that 8-bit values in same 5-bit bucket convert identically
+        assert_eq!(
+            Rasterizer::rgb_to_rgb15(8, 8, 8),
+            Rasterizer::rgb_to_rgb15(15, 15, 15)
+        );
+
+        // Test precision loss
+        let rgb15 = Rasterizer::rgb_to_rgb15(100, 150, 200);
+        let (r24, g24, b24) = Rasterizer::rgb15_to_rgb24(rgb15);
+
+        // Round-trip should not equal original due to precision loss
+        assert!(r24 <= 100 + 8); // Within one 5-bit step
+        assert!(g24 <= 150 + 8);
+        assert!(b24 <= 200 + 8);
+    }
+
+    #[test]
+    fn test_blended_triangle_multiple_layers() {
+        use crate::core::gpu::BlendMode;
+
+        let mut vram = vec![0x7FFF; 1024 * 512]; // White background
+        let mut rasterizer = Rasterizer::new();
+
+        // Draw multiple semi-transparent triangles on top of each other
+        for _ in 0..5 {
+            rasterizer.draw_triangle_blended(
+                &mut vram,
+                (100, 100),
+                (200, 100),
+                (150, 200),
+                0x0000, // Black
+                BlendMode::Average,
+            );
+        }
+
+        // After 5 layers of averaging with black, should be significantly darker
+        let center_pixel = vram[150 * 1024 + 150];
+        assert!(center_pixel < 0x4000); // Less than 50% brightness
+    }
 }

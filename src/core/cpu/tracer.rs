@@ -348,4 +348,374 @@ mod tests {
         assert!(contents.contains("r4=12345678"));
         assert!(contents.contains("r5=ABCDEF00"));
     }
+
+    // ========== Additional Tracer Tests ==========
+
+    #[test]
+    fn test_tracer_multiple_traces() {
+        let cpu = CPU::new();
+        let mut bus = Bus::new();
+
+        // Write several instructions
+        bus.write_bios_for_test(0, &[0x00, 0x00, 0x00, 0x00]); // NOP
+        bus.write_bios_for_test(4, &[0x34, 0x22, 0x00, 0x42]); // ORI r2, r1, 0x4200
+
+        let temp_dir = std::env::temp_dir();
+        let trace_path = temp_dir.join("test_trace_multiple.log");
+        let mut tracer = CpuTracer::new(trace_path.to_str().unwrap()).unwrap();
+
+        // Trace multiple times
+        tracer.trace(&cpu, &bus).unwrap();
+        tracer.trace(&cpu, &bus).unwrap();
+        tracer.trace(&cpu, &bus).unwrap();
+
+        tracer.flush().unwrap();
+
+        // Verify multiple lines were written
+        let mut file = File::open(&trace_path).unwrap();
+        let mut contents = String::new();
+        file.read_to_string(&mut contents).unwrap();
+
+        let line_count = contents.lines().count();
+        assert_eq!(line_count, 3);
+    }
+
+    #[test]
+    fn test_tracer_all_register_values() {
+        let mut cpu = CPU::new();
+        let mut bus = Bus::new();
+
+        // Set various register values
+        for i in 1..32 {
+            cpu.set_reg(i, 0x1000 + i as u32);
+        }
+
+        // Write a NOP instruction
+        bus.write_bios_for_test(0, &[0x00, 0x00, 0x00, 0x00]);
+
+        let temp_dir = std::env::temp_dir();
+        let trace_path = temp_dir.join("test_trace_all_regs.log");
+        let mut tracer = CpuTracer::new(trace_path.to_str().unwrap()).unwrap();
+
+        // Trace with many registers
+        let regs = [1, 2, 3, 4, 5, 6, 7, 8];
+        let result = tracer.trace_with_regs(&cpu, &bus, &regs);
+        assert!(result.is_ok());
+
+        tracer.flush().unwrap();
+
+        // Verify all requested registers appear in trace
+        let mut file = File::open(&trace_path).unwrap();
+        let mut contents = String::new();
+        file.read_to_string(&mut contents).unwrap();
+
+        for &reg in &regs {
+            let expected = format!("r{}={:08X}", reg, 0x1000 + reg as u32);
+            assert!(
+                contents.contains(&expected),
+                "Trace should contain {}",
+                expected
+            );
+        }
+    }
+
+    #[test]
+    fn test_tracer_invalid_register() {
+        let cpu = CPU::new();
+        let mut bus = Bus::new();
+
+        // Write a NOP instruction
+        bus.write_bios_for_test(0, &[0x00, 0x00, 0x00, 0x00]);
+
+        let temp_dir = std::env::temp_dir();
+        let trace_path = temp_dir.join("test_trace_invalid_reg.log");
+        let mut tracer = CpuTracer::new(trace_path.to_str().unwrap()).unwrap();
+
+        // Try to trace with invalid register number
+        let result = tracer.trace_with_regs(&cpu, &bus, &[32]); // r32 doesn't exist
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_tracer_enable_disable_toggle() {
+        let cpu = CPU::new();
+        let mut bus = Bus::new();
+
+        bus.write_bios_for_test(0, &[0x00, 0x00, 0x00, 0x00]);
+
+        let temp_dir = std::env::temp_dir();
+        let trace_path = temp_dir.join("test_trace_toggle.log");
+        let mut tracer = CpuTracer::new(trace_path.to_str().unwrap()).unwrap();
+
+        // Trace while enabled
+        assert!(tracer.is_enabled());
+        tracer.trace(&cpu, &bus).unwrap();
+
+        // Disable and trace (should not write)
+        tracer.set_enabled(false);
+        assert!(!tracer.is_enabled());
+        tracer.trace(&cpu, &bus).unwrap();
+
+        // Re-enable and trace
+        tracer.set_enabled(true);
+        assert!(tracer.is_enabled());
+        tracer.trace(&cpu, &bus).unwrap();
+
+        tracer.flush().unwrap();
+
+        // Should only have 2 lines (first and third trace)
+        let mut file = File::open(&trace_path).unwrap();
+        let mut contents = String::new();
+        file.read_to_string(&mut contents).unwrap();
+
+        let line_count = contents.lines().count();
+        assert_eq!(line_count, 2);
+    }
+
+    #[test]
+    fn test_tracer_zero_register() {
+        let cpu = CPU::new();
+        let mut bus = Bus::new();
+
+        bus.write_bios_for_test(0, &[0x00, 0x00, 0x00, 0x00]);
+
+        let temp_dir = std::env::temp_dir();
+        let trace_path = temp_dir.join("test_trace_r0.log");
+        let mut tracer = CpuTracer::new(trace_path.to_str().unwrap()).unwrap();
+
+        // Trace with r0 (should always be 0)
+        let result = tracer.trace_with_regs(&cpu, &bus, &[0]);
+        assert!(result.is_ok());
+
+        tracer.flush().unwrap();
+
+        // Verify r0 is always zero
+        let mut file = File::open(&trace_path).unwrap();
+        let mut contents = String::new();
+        file.read_to_string(&mut contents).unwrap();
+
+        assert!(contents.contains("r0=00000000"));
+    }
+
+    #[test]
+    fn test_tracer_high_registers() {
+        let mut cpu = CPU::new();
+        let mut bus = Bus::new();
+
+        // Set high register values (r28-r31)
+        cpu.set_reg(28, 0x10000000); // gp
+        cpu.set_reg(29, 0x801FFF00); // sp
+        cpu.set_reg(30, 0x801FFF08); // fp
+        cpu.set_reg(31, 0xBFC00100); // ra
+
+        bus.write_bios_for_test(0, &[0x00, 0x00, 0x00, 0x00]);
+
+        let temp_dir = std::env::temp_dir();
+        let trace_path = temp_dir.join("test_trace_high_regs.log");
+        let mut tracer = CpuTracer::new(trace_path.to_str().unwrap()).unwrap();
+
+        let result = tracer.trace_with_regs(&cpu, &bus, &[28, 29, 30, 31]);
+        assert!(result.is_ok());
+
+        tracer.flush().unwrap();
+
+        // Verify high registers are traced correctly
+        let mut file = File::open(&trace_path).unwrap();
+        let mut contents = String::new();
+        file.read_to_string(&mut contents).unwrap();
+
+        assert!(contents.contains("r28=10000000"));
+        assert!(contents.contains("r29=801FFF00"));
+        assert!(contents.contains("r30=801FFF08"));
+        assert!(contents.contains("r31=BFC00100"));
+    }
+
+    #[test]
+    fn test_tracer_different_instructions() {
+        let cpu = CPU::new();
+        let mut bus = Bus::new();
+
+        // Write different instruction types
+        bus.write_bios_for_test(0, &[0x34, 0x01, 0x12, 0x3C]); // LUI r1, 0x1234
+        bus.write_bios_for_test(4, &[0x42, 0x00, 0x22, 0x24]); // ADDIU r2, r1, 66
+
+        let temp_dir = std::env::temp_dir();
+        let trace_path = temp_dir.join("test_trace_diff_instr.log");
+        let mut tracer = CpuTracer::new(trace_path.to_str().unwrap()).unwrap();
+
+        // Trace first instruction
+        tracer.trace(&cpu, &bus).unwrap();
+
+        tracer.flush().unwrap();
+
+        // Verify instruction was disassembled correctly
+        let mut file = File::open(&trace_path).unwrap();
+        let mut contents = String::new();
+        file.read_to_string(&mut contents).unwrap();
+
+        assert!(contents.contains("lui"));
+    }
+
+    #[test]
+    fn test_tracer_register_limit() {
+        let cpu = CPU::new();
+        let mut bus = Bus::new();
+
+        bus.write_bios_for_test(0, &[0x00, 0x00, 0x00, 0x00]);
+
+        let temp_dir = std::env::temp_dir();
+        let trace_path = temp_dir.join("test_trace_reg_limit.log");
+        let mut tracer = CpuTracer::new(trace_path.to_str().unwrap()).unwrap();
+
+        // Try to trace more than 8 registers (should only trace first 8)
+        let regs = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+        let result = tracer.trace_with_regs(&cpu, &bus, &regs);
+        assert!(result.is_ok());
+
+        tracer.flush().unwrap();
+
+        // Verify only first 8 registers are traced
+        let mut file = File::open(&trace_path).unwrap();
+        let mut contents = String::new();
+        file.read_to_string(&mut contents).unwrap();
+
+        assert!(contents.contains("r8="));
+        assert!(!contents.contains("r9=")); // r9 should not be traced
+    }
+
+    #[test]
+    fn test_tracer_empty_register_list() {
+        let cpu = CPU::new();
+        let mut bus = Bus::new();
+
+        bus.write_bios_for_test(0, &[0x00, 0x00, 0x00, 0x00]);
+
+        let temp_dir = std::env::temp_dir();
+        let trace_path = temp_dir.join("test_trace_empty_regs.log");
+        let mut tracer = CpuTracer::new(trace_path.to_str().unwrap()).unwrap();
+
+        // Trace with empty register list
+        let result = tracer.trace_with_regs(&cpu, &bus, &[]);
+        assert!(result.is_ok());
+
+        tracer.flush().unwrap();
+
+        // Should still have trace line but no register values
+        let mut file = File::open(&trace_path).unwrap();
+        let mut contents = String::new();
+        file.read_to_string(&mut contents).unwrap();
+
+        assert!(contents.contains("PC="));
+        assert!(contents.contains("nop"));
+    }
+
+    #[test]
+    fn test_tracer_flush_behavior() {
+        let cpu = CPU::new();
+        let mut bus = Bus::new();
+
+        bus.write_bios_for_test(0, &[0x00, 0x00, 0x00, 0x00]);
+
+        let temp_dir = std::env::temp_dir();
+        let trace_path = temp_dir.join("test_trace_flush.log");
+        let mut tracer = CpuTracer::new(trace_path.to_str().unwrap()).unwrap();
+
+        // Trace and flush multiple times
+        tracer.trace(&cpu, &bus).unwrap();
+        tracer.flush().unwrap();
+
+        tracer.trace(&cpu, &bus).unwrap();
+        tracer.flush().unwrap();
+
+        // Verify both traces were written
+        let mut file = File::open(&trace_path).unwrap();
+        let mut contents = String::new();
+        file.read_to_string(&mut contents).unwrap();
+
+        assert_eq!(contents.lines().count(), 2);
+    }
+
+    #[test]
+    fn test_tracer_different_pc_values() {
+        let mut cpu = CPU::new();
+        let mut bus = Bus::new();
+
+        // Write instructions at different locations
+        bus.write_bios_for_test(0, &[0x00, 0x00, 0x00, 0x00]); // NOP at 0xBFC00000
+        bus.write_bios_for_test(0x100, &[0x08, 0x00, 0xE0, 0x03]); // JR r31 at 0xBFC00100
+
+        let temp_dir = std::env::temp_dir();
+        let trace_path = temp_dir.join("test_trace_diff_pc.log");
+        let mut tracer = CpuTracer::new(trace_path.to_str().unwrap()).unwrap();
+
+        // Trace first location
+        tracer.trace(&cpu, &bus).unwrap();
+
+        // Change PC and trace again
+        cpu.set_pc(0xBFC00100);
+        tracer.trace(&cpu, &bus).unwrap();
+
+        tracer.flush().unwrap();
+
+        // Verify different PC values are in trace
+        let mut file = File::open(&trace_path).unwrap();
+        let mut contents = String::new();
+        file.read_to_string(&mut contents).unwrap();
+
+        assert!(contents.contains("PC=0xBFC00000"));
+        assert!(contents.contains("PC=0xBFC00100"));
+    }
+
+    #[test]
+    fn test_tracer_instruction_encoding() {
+        let cpu = CPU::new();
+        let mut bus = Bus::new();
+
+        // Write specific instruction with known encoding
+        bus.write_bios_for_test(0, &[0x34, 0x12, 0x01, 0x3C]); // LUI r1, 0x1234
+
+        let temp_dir = std::env::temp_dir();
+        let trace_path = temp_dir.join("test_trace_encoding.log");
+        let mut tracer = CpuTracer::new(trace_path.to_str().unwrap()).unwrap();
+
+        tracer.trace(&cpu, &bus).unwrap();
+        tracer.flush().unwrap();
+
+        // Verify raw instruction encoding appears in trace
+        let mut file = File::open(&trace_path).unwrap();
+        let mut contents = String::new();
+        file.read_to_string(&mut contents).unwrap();
+
+        assert!(contents.contains("0x3C011234"));
+    }
+
+    #[test]
+    fn test_tracer_default_registers() {
+        let mut cpu = CPU::new();
+        let mut bus = Bus::new();
+
+        // Set the default traced registers (r1, r2, r3)
+        cpu.set_reg(1, 0xAABBCCDD);
+        cpu.set_reg(2, 0x11223344);
+        cpu.set_reg(3, 0x55667788);
+
+        bus.write_bios_for_test(0, &[0x00, 0x00, 0x00, 0x00]);
+
+        let temp_dir = std::env::temp_dir();
+        let trace_path = temp_dir.join("test_trace_defaults.log");
+        let mut tracer = CpuTracer::new(trace_path.to_str().unwrap()).unwrap();
+
+        // Use default trace (should show r1, r2, r3)
+        tracer.trace(&cpu, &bus).unwrap();
+        tracer.flush().unwrap();
+
+        // Verify default registers appear
+        let mut file = File::open(&trace_path).unwrap();
+        let mut contents = String::new();
+        file.read_to_string(&mut contents).unwrap();
+
+        assert!(contents.contains("r1=AABBCCDD"));
+        assert!(contents.contains("r2=11223344"));
+        assert!(contents.contains("r3=55667788"));
+    }
 }

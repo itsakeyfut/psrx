@@ -59,9 +59,6 @@ use crate::core::cdrom::CDROM;
 use crate::core::gpu::GPU;
 use crate::core::spu::SPU;
 
-#[cfg(test)]
-mod tests;
-
 /// DMA Controller with 7 channels
 ///
 /// The DMA controller manages data transfers between memory and peripherals,
@@ -730,5 +727,615 @@ impl DMA {
 impl Default for DMA {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Helper function to create test DMA controller
+    fn create_test_dma() -> DMA {
+        DMA::new()
+    }
+
+    // ========== Initialization Tests ==========
+
+    #[test]
+    fn test_dma_initialization() {
+        let dma = create_test_dma();
+
+        // Verify default DPCR value (0x07654321 per PSX-SPX spec)
+        assert_eq!(
+            dma.read_control(),
+            0x07654321,
+            "DPCR should initialize to default priority order"
+        );
+
+        // Verify DICR starts at 0
+        assert_eq!(dma.read_interrupt(), 0, "DICR should initialize to 0");
+
+        // Verify all channels are inactive
+        for ch in 0..7 {
+            assert!(
+                !dma.channels[ch].is_active(),
+                "Channel {} should be inactive after init",
+                ch
+            );
+            assert_eq!(dma.read_madr(ch), 0, "Channel {} MADR should be 0", ch);
+            assert_eq!(dma.read_bcr(ch), 0, "Channel {} BCR should be 0", ch);
+            assert_eq!(dma.read_chcr(ch), 0, "Channel {} CHCR should be 0", ch);
+        }
+    }
+
+    // ========== MADR Register Tests ==========
+
+    #[test]
+    fn test_madr_read_write() {
+        let mut dma = create_test_dma();
+
+        // Write and read MADR for channel 2 (GPU)
+        dma.write_madr(DMA::CH_GPU, 0x12345678);
+        assert_eq!(
+            dma.read_madr(DMA::CH_GPU),
+            0x00345678,
+            "MADR should mask to 24 bits (per PSX-SPX spec)"
+        );
+
+        // Test different channels
+        dma.write_madr(DMA::CH_CDROM, 0x80001000);
+        assert_eq!(
+            dma.read_madr(DMA::CH_CDROM),
+            0x00001000,
+            "MADR should mask upper bits"
+        );
+    }
+
+    #[test]
+    fn test_madr_address_masking() {
+        let mut dma = create_test_dma();
+
+        // Test that addresses are masked to 24 bits (bits 24-31 cleared)
+        dma.write_madr(DMA::CH_GPU, 0xFFFFFFFF);
+        assert_eq!(
+            dma.read_madr(DMA::CH_GPU),
+            0x00FFFFFF,
+            "MADR should mask to 24 bits"
+        );
+    }
+
+    // ========== BCR Register Tests ==========
+
+    #[test]
+    fn test_bcr_read_write() {
+        let mut dma = create_test_dma();
+
+        // Write and read BCR
+        dma.write_bcr(DMA::CH_GPU, 0x00100020);
+        assert_eq!(
+            dma.read_bcr(DMA::CH_GPU),
+            0x00100020,
+            "BCR should store full 32 bits"
+        );
+
+        // Test block size and count extraction (per PSX-SPX spec)
+        let bcr = dma.read_bcr(DMA::CH_GPU);
+        let block_size = bcr & 0xFFFF;
+        let block_count = (bcr >> 16) & 0xFFFF;
+
+        assert_eq!(block_size, 0x0020, "Block size should be lower 16 bits");
+        assert_eq!(block_count, 0x0010, "Block count should be upper 16 bits");
+    }
+
+    // ========== CHCR Register Tests ==========
+
+    #[test]
+    fn test_chcr_direction_bit() {
+        let mut dma = create_test_dma();
+
+        // Bit 0: Direction (0=device→RAM, 1=RAM→device)
+        dma.write_chcr(DMA::CH_GPU, 0x00000001);
+        assert_eq!(
+            dma.channels[DMA::CH_GPU].direction(),
+            1,
+            "Direction bit should be set to RAM→device"
+        );
+
+        dma.write_chcr(DMA::CH_GPU, 0x00000000);
+        assert_eq!(
+            dma.channels[DMA::CH_GPU].direction(),
+            0,
+            "Direction bit should be set to device→RAM"
+        );
+    }
+
+    #[test]
+    fn test_chcr_sync_mode_bits() {
+        let mut dma = create_test_dma();
+
+        // Bits 9-10: Sync mode (per PSX-SPX spec)
+        dma.write_chcr(DMA::CH_GPU, 0x00000000); // Mode 0: Immediate
+        assert_eq!(dma.channels[DMA::CH_GPU].sync_mode(), 0, "Sync mode 0");
+
+        dma.write_chcr(DMA::CH_GPU, 0x00000200); // Mode 1: Block
+        assert_eq!(dma.channels[DMA::CH_GPU].sync_mode(), 1, "Sync mode 1");
+
+        dma.write_chcr(DMA::CH_GPU, 0x00000400); // Mode 2: Linked-list
+        assert_eq!(dma.channels[DMA::CH_GPU].sync_mode(), 2, "Sync mode 2");
+    }
+
+    #[test]
+    fn test_chcr_active_bit() {
+        let mut dma = create_test_dma();
+
+        // Bit 24: Start/busy flag
+        dma.write_chcr(DMA::CH_GPU, 0x01000000);
+        assert!(
+            dma.channels[DMA::CH_GPU].is_active(),
+            "Channel should be active when bit 24 is set"
+        );
+
+        dma.write_chcr(DMA::CH_GPU, 0x00000000);
+        assert!(
+            !dma.channels[DMA::CH_GPU].is_active(),
+            "Channel should be inactive when bit 24 is clear"
+        );
+    }
+
+    #[test]
+    fn test_chcr_trigger_bit() {
+        let mut dma = create_test_dma();
+
+        // Bit 28: Manual trigger
+        dma.write_chcr(DMA::CH_GPU, 0x10000000);
+        assert!(
+            dma.channels[DMA::CH_GPU].trigger(),
+            "Trigger should be set when bit 28 is set"
+        );
+
+        dma.write_chcr(DMA::CH_GPU, 0x00000000);
+        assert!(
+            !dma.channels[DMA::CH_GPU].trigger(),
+            "Trigger should be clear when bit 28 is clear"
+        );
+    }
+
+    #[test]
+    fn test_channel_deactivation() {
+        let mut dma = create_test_dma();
+
+        // Activate channel
+        dma.write_chcr(DMA::CH_GPU, 0x01000000);
+        assert!(dma.channels[DMA::CH_GPU].is_active());
+
+        // Deactivate channel
+        dma.channels[DMA::CH_GPU].deactivate();
+        assert!(
+            !dma.channels[DMA::CH_GPU].is_active(),
+            "Channel should be inactive after deactivate()"
+        );
+    }
+
+    // ========== DPCR (Control Register) Tests ==========
+
+    #[test]
+    fn test_dpcr_channel_enable_bits() {
+        let mut dma = create_test_dma();
+
+        // Bit 3, 7, 11, 15, 19, 23, 27: Channel enable (per PSX-SPX spec)
+        dma.write_control(0xFFFFFFFF);
+        for ch in 0..7 {
+            assert!(
+                dma.is_channel_enabled(ch),
+                "Channel {} should be enabled",
+                ch
+            );
+        }
+
+        // Disable all channels
+        dma.write_control(0x00000000);
+        for ch in 0..7 {
+            assert!(
+                !dma.is_channel_enabled(ch),
+                "Channel {} should be disabled",
+                ch
+            );
+        }
+    }
+
+    #[test]
+    fn test_dpcr_channel_priority() {
+        let mut dma = create_test_dma();
+
+        // Default priority: 0x07654321
+        assert_eq!(
+            dma.channel_priority(0),
+            1,
+            "Channel 0 default priority should be 1"
+        );
+        assert_eq!(
+            dma.channel_priority(1),
+            2,
+            "Channel 1 default priority should be 2"
+        );
+        assert_eq!(
+            dma.channel_priority(6),
+            7,
+            "Channel 6 default priority should be 7"
+        );
+
+        // Set custom priorities
+        dma.write_control(0x76543210);
+        assert_eq!(dma.channel_priority(0), 0);
+        assert_eq!(dma.channel_priority(1), 1);
+        assert_eq!(dma.channel_priority(6), 6);
+    }
+
+    #[test]
+    fn test_dpcr_individual_channel_enable() {
+        let mut dma = create_test_dma();
+
+        // Enable only channel 2 (GPU) - bit 11
+        dma.write_control(0x00000808);
+        assert!(
+            dma.is_channel_enabled(DMA::CH_GPU),
+            "Channel 2 should be enabled"
+        );
+        assert!(
+            !dma.is_channel_enabled(DMA::CH_CDROM),
+            "Channel 3 should be disabled"
+        );
+    }
+
+    // ========== DICR (Interrupt Register) Tests ==========
+
+    #[test]
+    fn test_dicr_channel_interrupt_enable() {
+        let mut dma = create_test_dma();
+
+        // Bits 16-22: Channel interrupt enable masks
+        dma.write_interrupt(0x007F0000);
+        assert_eq!(
+            dma.read_interrupt() & 0x007F0000,
+            0x007F0000,
+            "All channel interrupt enables should be set"
+        );
+    }
+
+    #[test]
+    fn test_dicr_channel_interrupt_flags() {
+        let mut dma = create_test_dma();
+
+        // Bits 24-30: Channel interrupt flags
+        // Set flag for channel 2
+        dma.interrupt |= 1 << (24 + DMA::CH_GPU);
+        assert!(
+            (dma.read_interrupt() & (1 << (24 + DMA::CH_GPU))) != 0,
+            "Channel 2 interrupt flag should be set"
+        );
+    }
+
+    #[test]
+    fn test_dicr_write_1_to_clear_flags() {
+        let mut dma = create_test_dma();
+
+        // Set interrupt flag for channel 2
+        dma.interrupt |= 1 << (24 + DMA::CH_GPU);
+
+        // Write 1 to clear (per PSX-SPX spec)
+        dma.write_interrupt(1 << (24 + DMA::CH_GPU));
+
+        assert_eq!(
+            dma.read_interrupt() & (1 << (24 + DMA::CH_GPU)),
+            0,
+            "Channel 2 flag should be cleared by writing 1"
+        );
+    }
+
+    #[test]
+    fn test_dicr_master_flag_with_force_bit() {
+        let mut dma = create_test_dma();
+
+        // Bit 15: Force IRQ (per PSX-SPX spec)
+        dma.write_interrupt(1 << 15);
+        dma.update_master_flag();
+
+        assert!(
+            (dma.read_interrupt() & (1 << 31)) != 0,
+            "Master flag (bit 31) should be set when force bit is set"
+        );
+    }
+
+    #[test]
+    fn test_dicr_master_flag_with_channel_interrupt() {
+        let mut dma = create_test_dma();
+
+        // Enable master interrupt (bit 23)
+        // Enable channel 2 interrupt (bit 16+2 = 18)
+        // Set channel 2 flag (bit 24+2 = 26)
+        dma.write_interrupt((1 << 23) | (1 << 18));
+        dma.interrupt |= 1 << 26;
+        dma.update_master_flag();
+
+        assert!(
+            (dma.read_interrupt() & (1 << 31)) != 0,
+            "Master flag should be set when master enable + channel enable + channel flag are all set"
+        );
+    }
+
+    #[test]
+    fn test_dicr_master_flag_without_enable() {
+        let mut dma = create_test_dma();
+
+        // Set channel flag but not enable bits
+        dma.interrupt |= 1 << 26;
+        dma.update_master_flag();
+
+        assert_eq!(
+            dma.read_interrupt() & (1 << 31),
+            0,
+            "Master flag should not be set without enable bits"
+        );
+    }
+
+    #[test]
+    fn test_dicr_reserved_bits_read_as_zero() {
+        let mut dma = create_test_dma();
+
+        // Bits 0-5 are always 0 (per PSX-SPX spec)
+        dma.write_interrupt(0xFFFFFFFF);
+        assert_eq!(
+            dma.read_interrupt() & 0x0000003F,
+            0,
+            "Bits 0-5 should always read as 0"
+        );
+    }
+
+    // ========== Block Control Tests ==========
+
+    #[test]
+    fn test_block_control_sync_mode_0_calculation() {
+        let mut dma = create_test_dma();
+
+        // Sync mode 0: word count in lower 16 bits (or 0x10000 if 0)
+        dma.write_bcr(DMA::CH_OTC, 0x0000);
+        let bcr = dma.read_bcr(DMA::CH_OTC);
+        let words = if bcr & 0xFFFF == 0 {
+            0x10000
+        } else {
+            bcr & 0xFFFF
+        };
+        assert_eq!(
+            words, 0x10000,
+            "Sync mode 0: BCR=0 should mean 0x10000 words"
+        );
+
+        dma.write_bcr(DMA::CH_OTC, 0x0100);
+        let words = dma.read_bcr(DMA::CH_OTC) & 0xFFFF;
+        assert_eq!(words, 0x0100, "Sync mode 0: BCR should be word count");
+    }
+
+    #[test]
+    fn test_block_control_sync_mode_1_calculation() {
+        let mut dma = create_test_dma();
+
+        // Sync mode 1: block_size * block_count
+        dma.write_bcr(DMA::CH_GPU, 0x00100020);
+        let bcr = dma.read_bcr(DMA::CH_GPU);
+        let block_size = (bcr & 0xFFFF) as usize;
+        let block_count = ((bcr >> 16) & 0xFFFF) as usize;
+        let total = block_size * block_count;
+
+        assert_eq!(block_size, 0x20, "Block size should be 32 words");
+        assert_eq!(block_count, 0x10, "Block count should be 16 blocks");
+        assert_eq!(total, 0x200, "Total should be 512 words");
+    }
+
+    // ========== Channel Priority Tests ==========
+
+    #[test]
+    fn test_channel_priority_ordering() {
+        let dma = create_test_dma();
+
+        // Default: 0x07654321 means priority 7,6,5,4,3,2,1 for channels 6,5,4,3,2,1,0
+        let priorities: Vec<u32> = (0..7).map(|ch| dma.channel_priority(ch)).collect();
+
+        assert_eq!(
+            priorities,
+            vec![1, 2, 3, 4, 5, 6, 7],
+            "Default priorities should be 1-7"
+        );
+
+        // Verify channel 6 has highest priority
+        assert!(
+            dma.channel_priority(6) > dma.channel_priority(0),
+            "Channel 6 should have higher priority than channel 0"
+        );
+    }
+
+    // ========== Transfer Mode Tests ==========
+
+    #[test]
+    fn test_transfer_direction_ram_to_device() {
+        let mut dma = create_test_dma();
+
+        // Direction bit 0: 1 = RAM→device
+        dma.write_chcr(DMA::CH_GPU, 0x01000001);
+        assert_eq!(
+            dma.channels[DMA::CH_GPU].direction(),
+            DMAChannel::TRANSFER_FROM_RAM,
+            "Direction should be RAM→device"
+        );
+    }
+
+    #[test]
+    fn test_transfer_direction_device_to_ram() {
+        let mut dma = create_test_dma();
+
+        // Direction bit 0: 0 = device→RAM
+        dma.write_chcr(DMA::CH_CDROM, 0x01000000);
+        assert_eq!(
+            dma.channels[DMA::CH_CDROM].direction(),
+            DMAChannel::TRANSFER_TO_RAM,
+            "Direction should be device→RAM"
+        );
+    }
+
+    #[test]
+    fn test_all_sync_modes() {
+        let mut dma = create_test_dma();
+
+        // Mode 0: Immediate/Manual
+        dma.write_chcr(DMA::CH_GPU, 0x00000000);
+        assert_eq!(
+            dma.channels[DMA::CH_GPU].sync_mode(),
+            0,
+            "Sync mode should be 0 (immediate)"
+        );
+
+        // Mode 1: Block/Request
+        dma.write_chcr(DMA::CH_GPU, 0x00000200);
+        assert_eq!(
+            dma.channels[DMA::CH_GPU].sync_mode(),
+            1,
+            "Sync mode should be 1 (block)"
+        );
+
+        // Mode 2: Linked-list
+        dma.write_chcr(DMA::CH_GPU, 0x00000400);
+        assert_eq!(
+            dma.channels[DMA::CH_GPU].sync_mode(),
+            2,
+            "Sync mode should be 2 (linked-list)"
+        );
+    }
+
+    // ========== Edge Cases and Error Conditions ==========
+
+    #[test]
+    fn test_inactive_channel_does_not_transfer() {
+        let dma = create_test_dma();
+
+        // Channel should be inactive by default
+        for ch in 0..7 {
+            assert!(
+                !dma.channels[ch].is_active(),
+                "Channel {} should be inactive",
+                ch
+            );
+        }
+    }
+
+    #[test]
+    fn test_disabled_channel_cannot_transfer() {
+        let mut dma = create_test_dma();
+
+        // Disable all channels via DPCR
+        dma.write_control(0x00000000);
+
+        // Try to activate channel 2 via CHCR
+        dma.write_chcr(DMA::CH_GPU, 0x11000401);
+
+        // Channel should be active in CHCR but disabled in DPCR
+        assert!(
+            dma.channels[DMA::CH_GPU].is_active(),
+            "Channel should be active in CHCR"
+        );
+        assert!(
+            !dma.is_channel_enabled(DMA::CH_GPU),
+            "Channel should be disabled in DPCR"
+        );
+    }
+
+    #[test]
+    fn test_multiple_channels_can_be_active() {
+        let mut dma = create_test_dma();
+
+        // Activate channels 2, 3, 4
+        dma.write_chcr(DMA::CH_GPU, 0x11000400);
+        dma.write_chcr(DMA::CH_CDROM, 0x11000000);
+        dma.write_chcr(DMA::CH_SPU, 0x11000200);
+
+        assert!(
+            dma.channels[DMA::CH_GPU].is_active(),
+            "Channel 2 should be active"
+        );
+        assert!(
+            dma.channels[DMA::CH_CDROM].is_active(),
+            "Channel 3 should be active"
+        );
+        assert!(
+            dma.channels[DMA::CH_SPU].is_active(),
+            "Channel 4 should be active"
+        );
+    }
+
+    #[test]
+    fn test_address_masking_to_ram_bounds() {
+        let mut dma = create_test_dma();
+
+        // Address should be masked to 24 bits and aligned to word boundary
+        dma.write_madr(DMA::CH_GPU, 0xFF123456);
+        assert_eq!(
+            dma.read_madr(DMA::CH_GPU),
+            0x00123456,
+            "Address should be masked to 24 bits"
+        );
+
+        // In actual transfer, address is further masked to 0x001FFFFC (per code)
+        let addr = dma.read_madr(DMA::CH_GPU) & 0x001FFFFC;
+        assert_eq!(
+            addr, 0x00123454,
+            "Transfer address should align to word and mask to 2MB"
+        );
+    }
+
+    #[test]
+    fn test_interrupt_flag_preservation() {
+        let mut dma = create_test_dma();
+
+        // Set multiple channel flags
+        dma.interrupt = 0x07000000; // Channels 0, 1, 2 flags set
+
+        // Writing DICR should preserve flags unless explicitly cleared
+        dma.write_interrupt(0x00FF0000); // Write enable bits only
+
+        assert_eq!(
+            dma.read_interrupt() & 0x07000000,
+            0x07000000,
+            "Interrupt flags should be preserved unless write-1-to-clear"
+        );
+    }
+
+    #[test]
+    fn test_all_channels_have_unique_ids() {
+        let dma = create_test_dma();
+
+        for ch in 0..7 {
+            assert_eq!(
+                dma.channels[ch].channel_id, ch as u8,
+                "Channel {} ID should be {}",
+                ch, ch
+            );
+        }
+    }
+
+    #[test]
+    fn test_complete_transfer_setup() {
+        let mut dma = create_test_dma();
+
+        // Complete setup for GPU DMA transfer (linked-list mode)
+        dma.write_madr(DMA::CH_GPU, 0x80010000); // RAM address
+        dma.write_bcr(DMA::CH_GPU, 0x00000000); // Not used in linked-list
+        dma.write_chcr(DMA::CH_GPU, 0x11000401); // Active, trigger, linked-list, RAM→GPU
+        dma.write_control(0x08888888); // Enable channel 2
+        dma.write_interrupt((1 << 23) | (1 << 18)); // Master enable + channel 2 enable
+
+        // Verify setup
+        assert_eq!(dma.read_madr(DMA::CH_GPU), 0x00010000);
+        assert!(dma.channels[DMA::CH_GPU].is_active());
+        assert_eq!(dma.channels[DMA::CH_GPU].sync_mode(), 2);
+        assert_eq!(dma.channels[DMA::CH_GPU].direction(), 1);
+        assert!(dma.is_channel_enabled(DMA::CH_GPU));
     }
 }

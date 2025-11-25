@@ -331,4 +331,746 @@ impl Default for InterruptController {
 }
 
 #[cfg(test)]
-mod tests;
+mod tests {
+    use super::*;
+
+    // ============================================================================
+    // Basic Initialization and Register Tests
+    // ============================================================================
+
+    #[test]
+    fn test_new_initializes_to_zero() {
+        let ic = InterruptController::new();
+        assert_eq!(ic.read_status(), 0, "Status should be 0 on initialization");
+        assert_eq!(ic.read_mask(), 0, "Mask should be 0 on initialization");
+        assert!(!ic.is_pending(), "No interrupts should be pending");
+    }
+
+    #[test]
+    fn test_status_register_read_write() {
+        let mut ic = InterruptController::new();
+
+        // Request some interrupts
+        ic.request(interrupts::VBLANK | interrupts::GPU | interrupts::TIMER0);
+
+        // Read should return status
+        let status = ic.read_status();
+        assert_eq!(
+            status,
+            (interrupts::VBLANK | interrupts::GPU | interrupts::TIMER0) as u32
+        );
+    }
+
+    #[test]
+    fn test_mask_register_read_write() {
+        let mut ic = InterruptController::new();
+
+        // Write mask
+        ic.write_mask((interrupts::VBLANK | interrupts::GPU) as u32);
+
+        // Read should return mask
+        assert_eq!(
+            ic.read_mask(),
+            (interrupts::VBLANK | interrupts::GPU) as u32
+        );
+    }
+
+    #[test]
+    fn test_only_lower_16_bits_used() {
+        let mut ic = InterruptController::new();
+
+        // Write 32-bit value with upper bits set
+        ic.write_mask(0xFFFF_FFFF);
+        // Should only keep lower 16 bits
+        assert_eq!(ic.read_mask(), 0xFFFF);
+
+        ic.write_status(0xFFFF_FFFF);
+        // Status also only uses lower 16 bits
+        assert!(ic.read_status() <= 0xFFFF);
+    }
+
+    // ============================================================================
+    // Interrupt Request Tests
+    // ============================================================================
+
+    #[test]
+    fn test_request_single_interrupt() {
+        let mut ic = InterruptController::new();
+
+        ic.request(interrupts::VBLANK);
+        assert_eq!(ic.read_status(), interrupts::VBLANK as u32);
+
+        ic.request(interrupts::GPU);
+        assert_eq!(
+            ic.read_status(),
+            (interrupts::VBLANK | interrupts::GPU) as u32
+        );
+    }
+
+    #[test]
+    fn test_request_multiple_interrupts() {
+        let mut ic = InterruptController::new();
+
+        ic.request(interrupts::VBLANK | interrupts::GPU | interrupts::CDROM);
+        assert_eq!(
+            ic.read_status(),
+            (interrupts::VBLANK | interrupts::GPU | interrupts::CDROM) as u32
+        );
+    }
+
+    #[test]
+    fn test_request_all_interrupts() {
+        let mut ic = InterruptController::new();
+
+        // Request all 11 interrupt sources
+        let all_interrupts = interrupts::VBLANK
+            | interrupts::GPU
+            | interrupts::CDROM
+            | interrupts::DMA
+            | interrupts::TIMER0
+            | interrupts::TIMER1
+            | interrupts::TIMER2
+            | interrupts::CONTROLLER
+            | interrupts::SIO
+            | interrupts::SPU
+            | interrupts::LIGHTPEN;
+
+        ic.request(all_interrupts);
+        assert_eq!(ic.read_status(), all_interrupts as u32);
+    }
+
+    #[test]
+    fn test_request_accumulates() {
+        let mut ic = InterruptController::new();
+
+        ic.request(interrupts::VBLANK);
+        ic.request(interrupts::GPU);
+        ic.request(interrupts::TIMER0);
+
+        // All three should be set
+        assert_eq!(
+            ic.read_status(),
+            (interrupts::VBLANK | interrupts::GPU | interrupts::TIMER0) as u32
+        );
+    }
+
+    #[test]
+    fn test_request_idempotent() {
+        let mut ic = InterruptController::new();
+
+        ic.request(interrupts::VBLANK);
+        let status1 = ic.read_status();
+
+        ic.request(interrupts::VBLANK);
+        let status2 = ic.read_status();
+
+        // Requesting same interrupt twice shouldn't change state
+        assert_eq!(status1, status2);
+    }
+
+    // ============================================================================
+    // Acknowledge Tests (Write 0 to Clear)
+    // ============================================================================
+
+    #[test]
+    fn test_acknowledge_single_interrupt_write_zero() {
+        let mut ic = InterruptController::new();
+
+        ic.request(interrupts::VBLANK | interrupts::GPU);
+
+        // Acknowledge VBLANK by writing 0 to that bit (1s to others)
+        ic.acknowledge(!interrupts::VBLANK);
+
+        assert_eq!(ic.read_status(), interrupts::GPU as u32);
+    }
+
+    #[test]
+    fn test_acknowledge_multiple_interrupts() {
+        let mut ic = InterruptController::new();
+
+        ic.request(interrupts::VBLANK | interrupts::GPU | interrupts::TIMER0);
+
+        // Acknowledge VBLANK and GPU (write 0 to those bits)
+        ic.acknowledge(!(interrupts::VBLANK | interrupts::GPU));
+
+        assert_eq!(ic.read_status(), interrupts::TIMER0 as u32);
+    }
+
+    #[test]
+    fn test_acknowledge_all_interrupts() {
+        let mut ic = InterruptController::new();
+
+        ic.request(interrupts::VBLANK | interrupts::GPU | interrupts::TIMER0);
+
+        // Acknowledge all by writing all zeros
+        ic.acknowledge(0);
+
+        assert_eq!(ic.read_status(), 0);
+    }
+
+    #[test]
+    fn test_write_status_acknowledges() {
+        let mut ic = InterruptController::new();
+
+        ic.request(interrupts::VBLANK | interrupts::GPU);
+
+        // write_status should acknowledge (write 0 to clear)
+        ic.write_status(!interrupts::VBLANK as u32);
+
+        assert_eq!(ic.read_status(), interrupts::GPU as u32);
+    }
+
+    #[test]
+    fn test_write_one_does_not_clear() {
+        let mut ic = InterruptController::new();
+
+        ic.request(interrupts::VBLANK);
+
+        // Writing 1 to a bit should NOT clear it
+        ic.acknowledge(0xFFFF);
+
+        // VBLANK should still be set
+        assert_eq!(ic.read_status(), interrupts::VBLANK as u32);
+    }
+
+    #[test]
+    fn test_partial_acknowledge() {
+        let mut ic = InterruptController::new();
+
+        ic.request(interrupts::VBLANK | interrupts::GPU | interrupts::TIMER0 | interrupts::TIMER1);
+
+        // Acknowledge only TIMER0 and TIMER1
+        ic.acknowledge(!(interrupts::TIMER0 | interrupts::TIMER1));
+
+        // VBLANK and GPU should remain
+        assert_eq!(
+            ic.read_status(),
+            (interrupts::VBLANK | interrupts::GPU) as u32
+        );
+    }
+
+    // ============================================================================
+    // Interrupt Mask Tests
+    // ============================================================================
+
+    #[test]
+    fn test_masked_interrupt_not_pending() {
+        let mut ic = InterruptController::new();
+
+        // Request interrupt but don't enable mask
+        ic.request(interrupts::VBLANK);
+        ic.write_mask(0); // All masked
+
+        assert!(!ic.is_pending(), "Masked interrupt should not be pending");
+    }
+
+    #[test]
+    fn test_unmasked_interrupt_pending() {
+        let mut ic = InterruptController::new();
+
+        ic.request(interrupts::VBLANK);
+        ic.write_mask(interrupts::VBLANK as u32);
+
+        assert!(ic.is_pending(), "Unmasked interrupt should be pending");
+    }
+
+    #[test]
+    fn test_multiple_masked_interrupts() {
+        let mut ic = InterruptController::new();
+
+        ic.request(interrupts::VBLANK | interrupts::GPU | interrupts::TIMER0);
+
+        // Only enable VBLANK
+        ic.write_mask(interrupts::VBLANK as u32);
+
+        // Should be pending because VBLANK is requested and unmasked
+        assert!(ic.is_pending());
+    }
+
+    #[test]
+    fn test_mask_change_affects_pending() {
+        let mut ic = InterruptController::new();
+
+        ic.request(interrupts::VBLANK);
+        ic.write_mask(0);
+        assert!(!ic.is_pending());
+
+        // Enable mask
+        ic.write_mask(interrupts::VBLANK as u32);
+        assert!(ic.is_pending());
+
+        // Disable mask again
+        ic.write_mask(0);
+        assert!(!ic.is_pending());
+    }
+
+    #[test]
+    fn test_all_interrupts_masked_none_pending() {
+        let mut ic = InterruptController::new();
+
+        // Request all interrupts
+        ic.request(0x7FF); // Bits 0-10
+
+        // Mask all
+        ic.write_mask(0);
+
+        assert!(!ic.is_pending());
+    }
+
+    #[test]
+    fn test_all_interrupts_unmasked_pending() {
+        let mut ic = InterruptController::new();
+
+        ic.request(interrupts::VBLANK);
+        ic.write_mask(0xFFFF); // Unmask all
+
+        assert!(ic.is_pending());
+    }
+
+    // ============================================================================
+    // is_pending() Logic Tests (status & mask != 0)
+    // ============================================================================
+
+    #[test]
+    fn test_is_pending_requires_both_status_and_mask() {
+        let mut ic = InterruptController::new();
+
+        // Status set, mask clear
+        ic.request(interrupts::VBLANK);
+        ic.write_mask(0);
+        assert!(!ic.is_pending());
+
+        // Status clear, mask set
+        let mut ic2 = InterruptController::new();
+        ic2.write_mask(interrupts::VBLANK as u32);
+        assert!(!ic2.is_pending());
+
+        // Both set
+        ic.write_mask(interrupts::VBLANK as u32);
+        assert!(ic.is_pending());
+    }
+
+    #[test]
+    fn test_is_pending_different_bits() {
+        let mut ic = InterruptController::new();
+
+        // Request VBLANK, but only GPU is unmasked
+        ic.request(interrupts::VBLANK);
+        ic.write_mask(interrupts::GPU as u32);
+
+        assert!(
+            !ic.is_pending(),
+            "Different bits should not trigger pending"
+        );
+    }
+
+    #[test]
+    fn test_is_pending_partial_overlap() {
+        let mut ic = InterruptController::new();
+
+        // Request multiple, unmask subset
+        ic.request(interrupts::VBLANK | interrupts::GPU | interrupts::TIMER0);
+        ic.write_mask((interrupts::GPU | interrupts::TIMER1) as u32);
+
+        // GPU is both requested and unmasked
+        assert!(ic.is_pending());
+    }
+
+    // ============================================================================
+    // Edge Cases and Special Behaviors
+    // ============================================================================
+
+    #[test]
+    fn test_acknowledge_non_existent_interrupt() {
+        let mut ic = InterruptController::new();
+
+        ic.request(interrupts::VBLANK);
+
+        // Try to acknowledge GPU which isn't set
+        ic.acknowledge(!interrupts::GPU);
+
+        // Should have no effect on VBLANK
+        assert_eq!(ic.read_status(), interrupts::VBLANK as u32);
+    }
+
+    #[test]
+    fn test_acknowledge_clears_pending_status() {
+        let mut ic = InterruptController::new();
+
+        ic.request(interrupts::VBLANK);
+        ic.write_mask(interrupts::VBLANK as u32);
+
+        assert!(ic.is_pending());
+
+        // Acknowledge
+        ic.acknowledge(!interrupts::VBLANK);
+
+        assert!(!ic.is_pending());
+    }
+
+    #[test]
+    fn test_unused_bits_11_to_15() {
+        let mut ic = InterruptController::new();
+
+        // Try to set bits 11-15 (should be masked or ignored)
+        ic.request(0xF800); // Bits 11-15
+
+        // According to spec, bits 11-15 are unused (always zero)
+        // Implementation stores them but they shouldn't affect logic
+        let status = ic.read_status();
+
+        // At minimum, bits 0-10 should be zero
+        assert_eq!(status & 0x07FF, 0, "Bits 0-10 should be zero");
+    }
+
+    #[test]
+    fn test_rapid_request_acknowledge_cycle() {
+        let mut ic = InterruptController::new();
+
+        ic.write_mask(interrupts::VBLANK as u32);
+
+        for _ in 0..100 {
+            ic.request(interrupts::VBLANK);
+            assert!(ic.is_pending());
+
+            ic.acknowledge(!interrupts::VBLANK);
+            assert!(!ic.is_pending());
+        }
+    }
+
+    #[test]
+    fn test_interleaved_requests_and_acknowledges() {
+        let mut ic = InterruptController::new();
+        ic.write_mask(0xFFFF);
+
+        ic.request(interrupts::VBLANK);
+        assert!(ic.is_pending());
+
+        ic.request(interrupts::GPU);
+        assert!(ic.is_pending());
+
+        ic.acknowledge(!interrupts::VBLANK);
+        assert!(ic.is_pending()); // GPU still pending
+
+        ic.request(interrupts::TIMER0);
+        assert!(ic.is_pending());
+
+        ic.acknowledge(!(interrupts::GPU | interrupts::TIMER0));
+        assert!(!ic.is_pending()); // All cleared
+    }
+
+    // ============================================================================
+    // Race Condition and Edge-Triggered Behavior Tests
+    // ============================================================================
+
+    #[test]
+    fn test_request_after_acknowledge() {
+        let mut ic = InterruptController::new();
+        ic.write_mask(interrupts::VBLANK as u32);
+
+        // Request
+        ic.request(interrupts::VBLANK);
+        assert!(ic.is_pending());
+
+        // Acknowledge
+        ic.acknowledge(!interrupts::VBLANK);
+        assert!(!ic.is_pending());
+
+        // Request again (simulates new interrupt)
+        ic.request(interrupts::VBLANK);
+        assert!(ic.is_pending());
+    }
+
+    #[test]
+    fn test_simultaneous_request_and_acknowledge() {
+        let mut ic = InterruptController::new();
+        ic.write_mask((interrupts::VBLANK | interrupts::GPU) as u32);
+
+        ic.request(interrupts::VBLANK | interrupts::GPU);
+
+        // Acknowledge VBLANK while both are pending
+        ic.acknowledge(!interrupts::VBLANK);
+
+        // GPU should still be pending
+        assert!(ic.is_pending());
+        assert_eq!(ic.read_status(), interrupts::GPU as u32);
+    }
+
+    #[test]
+    fn test_mask_change_during_pending_interrupt() {
+        let mut ic = InterruptController::new();
+
+        ic.request(interrupts::VBLANK);
+        ic.write_mask(interrupts::VBLANK as u32);
+        assert!(ic.is_pending());
+
+        // Change mask to different interrupt
+        ic.write_mask(interrupts::GPU as u32);
+        assert!(!ic.is_pending());
+
+        // VBLANK status should still be set, just masked
+        assert_eq!(ic.read_status(), interrupts::VBLANK as u32);
+    }
+
+    // ============================================================================
+    // Individual Interrupt Source Tests
+    // ============================================================================
+
+    #[test]
+    fn test_vblank_interrupt() {
+        let mut ic = InterruptController::new();
+        assert_eq!(interrupts::VBLANK, 1 << 0);
+
+        ic.request(interrupts::VBLANK);
+        ic.write_mask(interrupts::VBLANK as u32);
+        assert!(ic.is_pending());
+    }
+
+    #[test]
+    fn test_gpu_interrupt() {
+        let mut ic = InterruptController::new();
+        assert_eq!(interrupts::GPU, 1 << 1);
+
+        ic.request(interrupts::GPU);
+        ic.write_mask(interrupts::GPU as u32);
+        assert!(ic.is_pending());
+    }
+
+    #[test]
+    fn test_cdrom_interrupt() {
+        let mut ic = InterruptController::new();
+        assert_eq!(interrupts::CDROM, 1 << 2);
+
+        ic.request(interrupts::CDROM);
+        ic.write_mask(interrupts::CDROM as u32);
+        assert!(ic.is_pending());
+    }
+
+    #[test]
+    fn test_dma_interrupt() {
+        let mut ic = InterruptController::new();
+        assert_eq!(interrupts::DMA, 1 << 3);
+
+        ic.request(interrupts::DMA);
+        ic.write_mask(interrupts::DMA as u32);
+        assert!(ic.is_pending());
+    }
+
+    #[test]
+    fn test_timer0_interrupt() {
+        let mut ic = InterruptController::new();
+        assert_eq!(interrupts::TIMER0, 1 << 4);
+
+        ic.request(interrupts::TIMER0);
+        ic.write_mask(interrupts::TIMER0 as u32);
+        assert!(ic.is_pending());
+    }
+
+    #[test]
+    fn test_timer1_interrupt() {
+        let mut ic = InterruptController::new();
+        assert_eq!(interrupts::TIMER1, 1 << 5);
+
+        ic.request(interrupts::TIMER1);
+        ic.write_mask(interrupts::TIMER1 as u32);
+        assert!(ic.is_pending());
+    }
+
+    #[test]
+    fn test_timer2_interrupt() {
+        let mut ic = InterruptController::new();
+        assert_eq!(interrupts::TIMER2, 1 << 6);
+
+        ic.request(interrupts::TIMER2);
+        ic.write_mask(interrupts::TIMER2 as u32);
+        assert!(ic.is_pending());
+    }
+
+    #[test]
+    fn test_controller_interrupt() {
+        let mut ic = InterruptController::new();
+        assert_eq!(interrupts::CONTROLLER, 1 << 7);
+
+        ic.request(interrupts::CONTROLLER);
+        ic.write_mask(interrupts::CONTROLLER as u32);
+        assert!(ic.is_pending());
+    }
+
+    #[test]
+    fn test_sio_interrupt() {
+        let mut ic = InterruptController::new();
+        assert_eq!(interrupts::SIO, 1 << 8);
+
+        ic.request(interrupts::SIO);
+        ic.write_mask(interrupts::SIO as u32);
+        assert!(ic.is_pending());
+    }
+
+    #[test]
+    fn test_spu_interrupt() {
+        let mut ic = InterruptController::new();
+        assert_eq!(interrupts::SPU, 1 << 9);
+
+        ic.request(interrupts::SPU);
+        ic.write_mask(interrupts::SPU as u32);
+        assert!(ic.is_pending());
+    }
+
+    #[test]
+    fn test_lightpen_interrupt() {
+        let mut ic = InterruptController::new();
+        assert_eq!(interrupts::LIGHTPEN, 1 << 10);
+
+        ic.request(interrupts::LIGHTPEN);
+        ic.write_mask(interrupts::LIGHTPEN as u32);
+        assert!(ic.is_pending());
+    }
+
+    // ============================================================================
+    // Bit Manipulation Edge Cases
+    // ============================================================================
+
+    #[test]
+    fn test_acknowledge_with_zero() {
+        let mut ic = InterruptController::new();
+
+        ic.request(0xFFFF);
+        ic.acknowledge(0x0000);
+
+        assert_eq!(ic.read_status(), 0, "All interrupts should be cleared");
+    }
+
+    #[test]
+    fn test_acknowledge_with_all_ones() {
+        let mut ic = InterruptController::new();
+
+        ic.request(interrupts::VBLANK | interrupts::GPU);
+        ic.acknowledge(0xFFFF);
+
+        // Writing all 1s should not clear anything
+        assert_eq!(
+            ic.read_status(),
+            (interrupts::VBLANK | interrupts::GPU) as u32
+        );
+    }
+
+    #[test]
+    fn test_selective_masking() {
+        let mut ic = InterruptController::new();
+
+        // Request many interrupts
+        ic.request(
+            interrupts::VBLANK
+                | interrupts::GPU
+                | interrupts::TIMER0
+                | interrupts::TIMER1
+                | interrupts::TIMER2,
+        );
+
+        // Only unmask timers
+        ic.write_mask((interrupts::TIMER0 | interrupts::TIMER1 | interrupts::TIMER2) as u32);
+
+        assert!(ic.is_pending());
+
+        // Acknowledge all timers
+        ic.acknowledge(!(interrupts::TIMER0 | interrupts::TIMER1 | interrupts::TIMER2));
+
+        assert!(!ic.is_pending());
+
+        // VBLANK and GPU should still be in status
+        assert_eq!(
+            ic.read_status(),
+            (interrupts::VBLANK | interrupts::GPU) as u32
+        );
+    }
+
+    // ============================================================================
+    // Complex Scenarios
+    // ============================================================================
+
+    #[test]
+    fn test_typical_interrupt_handling_sequence() {
+        let mut ic = InterruptController::new();
+
+        // 1. Enable interrupts we care about
+        ic.write_mask(
+            (interrupts::VBLANK | interrupts::GPU | interrupts::DMA | interrupts::CONTROLLER)
+                as u32,
+        );
+
+        // 2. VBLANK occurs
+        ic.request(interrupts::VBLANK);
+        assert!(ic.is_pending());
+
+        // 3. CPU handles VBLANK, acknowledges
+        ic.write_status(!interrupts::VBLANK as u32);
+        assert!(!ic.is_pending());
+
+        // 4. GPU and DMA complete simultaneously
+        ic.request(interrupts::GPU | interrupts::DMA);
+        assert!(ic.is_pending());
+
+        // 5. Handle GPU first
+        ic.write_status(!interrupts::GPU as u32);
+        assert!(ic.is_pending()); // DMA still pending
+
+        // 6. Handle DMA
+        ic.write_status(!interrupts::DMA as u32);
+        assert!(!ic.is_pending());
+    }
+
+    #[test]
+    fn test_interrupt_storm() {
+        let mut ic = InterruptController::new();
+        ic.write_mask(0xFFFF);
+
+        // Simulate many interrupts arriving rapidly
+        for i in 0..11 {
+            ic.request(1 << i);
+        }
+
+        // All 11 interrupts should be set
+        assert_eq!(ic.read_status() & 0x7FF, 0x7FF);
+        assert!(ic.is_pending());
+
+        // Acknowledge all
+        ic.write_status(0);
+        assert!(!ic.is_pending());
+    }
+
+    #[test]
+    fn test_masked_vs_unmasked_status() {
+        let mut ic = InterruptController::new();
+
+        // Request with mask disabled
+        ic.request(interrupts::VBLANK);
+        ic.write_mask(0);
+
+        // Status should show requested interrupt even if masked
+        assert_eq!(ic.read_status(), interrupts::VBLANK as u32);
+        // But it shouldn't be pending
+        assert!(!ic.is_pending());
+    }
+
+    #[test]
+    fn test_zero_status_zero_mask() {
+        let ic = InterruptController::new();
+
+        assert_eq!(ic.read_status(), 0);
+        assert_eq!(ic.read_mask(), 0);
+        assert!(!ic.is_pending());
+    }
+
+    #[test]
+    fn test_acknowledge_preserves_unrelated_bits() {
+        let mut ic = InterruptController::new();
+
+        ic.request(interrupts::VBLANK | interrupts::GPU | interrupts::TIMER0 | interrupts::TIMER1);
+
+        // Acknowledge only TIMER0, preserving all others
+        ic.acknowledge(!interrupts::TIMER0);
+
+        let expected = interrupts::VBLANK | interrupts::GPU | interrupts::TIMER1;
+        assert_eq!(ic.read_status(), expected as u32);
+    }
+}
