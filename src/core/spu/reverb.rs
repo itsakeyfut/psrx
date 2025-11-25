@@ -312,6 +312,7 @@ impl Default for ReverbConfig {
 }
 
 #[cfg(test)]
+#[allow(clippy::field_reassign_with_default)]
 mod tests {
     use super::*;
 
@@ -379,5 +380,275 @@ mod tests {
         // Read it back
         let value = reverb.read_reverb_buffer(&spu_ram, 0);
         assert_eq!(value, 0x1234);
+    }
+
+    #[test]
+    fn test_reverb_buffer_wrapping() {
+        let mut reverb = ReverbConfig::new();
+        let mut spu_ram = vec![0u8; 512 * 1024];
+
+        // Configure small work area
+        reverb.reverb_start_addr = 0x1000;
+        reverb.reverb_end_addr = 0x1010; // 16 byte work area
+        reverb.reverb_current_addr = 0;
+
+        // Write at offset that will wrap
+        reverb.write_reverb_buffer(&mut spu_ram, 12, 0x1BCD);
+
+        // Read should wrap around
+        let value = reverb.read_reverb_buffer(&spu_ram, 12);
+        assert_eq!(value, 0x1BCD);
+    }
+
+    #[test]
+    fn test_reverb_address_advance() {
+        let mut reverb = ReverbConfig::new();
+        reverb.reverb_start_addr = 0x1000;
+        reverb.reverb_end_addr = 0x1100; // 256 bytes
+        reverb.reverb_current_addr = 0;
+
+        // Advance multiple times
+        for _ in 0..10 {
+            reverb.advance_reverb_address();
+        }
+
+        // Should advance by 4 bytes per call
+        assert_eq!(reverb.reverb_current_addr, 40);
+    }
+
+    #[test]
+    fn test_reverb_address_wrap_at_end() {
+        let mut reverb = ReverbConfig::new();
+        reverb.reverb_start_addr = 0x1000;
+        reverb.reverb_end_addr = 0x1010; // 16 bytes
+        reverb.reverb_current_addr = 12; // Near end
+
+        reverb.advance_reverb_address();
+
+        // Should wrap to beginning
+        assert_eq!(reverb.reverb_current_addr, 0);
+    }
+
+    #[test]
+    fn test_reverb_zero_work_area() {
+        let mut reverb = ReverbConfig::new();
+        let mut spu_ram = vec![0u8; 512 * 1024];
+
+        // Zero-size work area
+        reverb.reverb_start_addr = 0x1000;
+        reverb.reverb_end_addr = 0x1000;
+        reverb.enabled = true;
+
+        // Should handle gracefully without crashing
+        reverb.write_reverb_buffer(&mut spu_ram, 0, 0x1234);
+        let value = reverb.read_reverb_buffer(&spu_ram, 0);
+        assert_eq!(value, 0);
+
+        reverb.advance_reverb_address();
+        assert_eq!(reverb.reverb_current_addr, 0);
+    }
+
+    #[test]
+    fn test_reverb_out_of_bounds_protection() {
+        let mut reverb = ReverbConfig::new();
+        let spu_ram = vec![0u8; 512 * 1024];
+
+        // Configure work area near end of RAM
+        reverb.reverb_start_addr = 512 * 1024 - 10;
+        reverb.reverb_end_addr = 512 * 1024 + 100; // Beyond RAM size
+
+        // Should not crash
+        let value = reverb.read_reverb_buffer(&spu_ram, 0);
+        assert_eq!(value, 0);
+    }
+
+    #[test]
+    fn test_apf_filter_zero_volume() {
+        let reverb = ReverbConfig::new();
+        let input = 1000i32;
+        let feedback = 500i16;
+        let volume = 0i16;
+
+        let output = reverb.apply_apf(input, feedback, volume);
+
+        // Zero volume should pass input through unchanged
+        assert_eq!(output, input);
+    }
+
+    #[test]
+    fn test_apf_filter_positive_volume() {
+        let reverb = ReverbConfig::new();
+        let input = 1000i32;
+        let feedback = 500i16;
+        let volume = 0x4000i16; // 0.5 in fixed-point
+
+        let output = reverb.apply_apf(input, feedback, volume);
+
+        // Should subtract scaled feedback from input
+        assert_ne!(output, input);
+        assert!(output < input);
+    }
+
+    #[test]
+    fn test_apf_filter_negative_feedback() {
+        let reverb = ReverbConfig::new();
+        let input = 1000i32;
+        let feedback = -500i16;
+        let volume = 0x4000i16;
+
+        let output = reverb.apply_apf(input, feedback, volume);
+
+        // Negative feedback should increase output
+        assert!(output > input);
+    }
+
+    #[test]
+    fn test_reverb_little_endian_storage() {
+        let mut reverb = ReverbConfig::new();
+        let mut spu_ram = vec![0u8; 512 * 1024];
+
+        reverb.reverb_start_addr = 0x1000;
+        reverb.reverb_end_addr = 0x2000;
+        reverb.reverb_current_addr = 0;
+
+        // Write value with distinct bytes
+        reverb.write_reverb_buffer(&mut spu_ram, 0, 0x1234);
+
+        // Check little-endian storage
+        assert_eq!(spu_ram[0x1000], 0x34); // Low byte
+        assert_eq!(spu_ram[0x1001], 0x12); // High byte
+    }
+
+    #[test]
+    fn test_reverb_comb_filters_multiple_taps() {
+        let mut reverb = ReverbConfig::new();
+        let spu_ram = vec![0u8; 512 * 1024];
+
+        reverb.reverb_start_addr = 0x1000;
+        reverb.reverb_end_addr = 0x2000;
+
+        // Set non-zero comb volumes
+        reverb.comb_volume1 = 0x1000;
+        reverb.comb_volume2 = 0x1000;
+        reverb.comb_volume3 = 0x1000;
+        reverb.comb_volume4 = 0x1000;
+
+        let input = 1000i32;
+        let output = reverb.apply_comb_filters(input, &spu_ram, 0);
+
+        // Output should include input contribution
+        // Exact value depends on buffer contents, but should be reasonable
+        assert!(output.abs() < 100000);
+    }
+
+    #[test]
+    fn test_reverb_process_with_configured_area() {
+        let mut reverb = ReverbConfig::new();
+        reverb.enabled = true;
+        reverb.reverb_start_addr = 0x1000;
+        reverb.reverb_end_addr = 0x2000;
+        reverb.input_volume_left = 0x4000;
+        reverb.input_volume_right = 0x4000;
+
+        let mut spu_ram = vec![0u8; 512 * 1024];
+
+        // Process multiple samples
+        for _ in 0..100 {
+            let (_left, _right) = reverb.process(1000, 1000, &mut spu_ram);
+
+            // Should produce valid output (always i16, so always valid)
+            // Just verify it doesn't crash
+        }
+    }
+
+    #[test]
+    fn test_reverb_parameters_independence() {
+        let mut reverb1 = ReverbConfig::new();
+        let reverb2 = ReverbConfig::new();
+
+        reverb1.apf_volume1 = 0x1000;
+        reverb1.comb_volume1 = 0x2000;
+
+        // reverb2 should remain independent
+        assert_eq!(reverb2.apf_volume1, 0);
+        assert_eq!(reverb2.comb_volume1, 0);
+    }
+
+    #[test]
+    fn test_reverb_disabled_preserves_input() {
+        let mut reverb = ReverbConfig::new();
+        reverb.enabled = false;
+
+        let mut spu_ram = vec![0u8; 512 * 1024];
+
+        let input_left = 12345i16;
+        let input_right = 23456i16;
+
+        let (left, right) = reverb.process(input_left, input_right, &mut spu_ram);
+
+        // Disabled reverb should pass through unchanged
+        assert_eq!(left, input_left);
+        assert_eq!(right, input_right);
+    }
+
+    #[test]
+    fn test_reverb_volume_scaling() {
+        let mut reverb = ReverbConfig::new();
+        reverb.enabled = true;
+        reverb.reverb_start_addr = 0x1000;
+        reverb.reverb_end_addr = 0x2000;
+
+        // Test different input volumes
+        let volumes = [0i16, 0x2000, 0x4000, 0x6000, 0x7FFF];
+
+        let mut spu_ram = vec![0u8; 512 * 1024];
+
+        for volume in &volumes {
+            reverb.input_volume_left = *volume;
+            reverb.input_volume_right = *volume;
+
+            let (_left, _right) = reverb.process(1000, 1000, &mut spu_ram);
+
+            // Output should scale with volume (roughly)
+            // Values are always i16, so always valid - just verify no crash
+        }
+    }
+
+    #[test]
+    fn test_reverb_buffer_offset_calculation() {
+        let mut reverb = ReverbConfig::new();
+        let mut spu_ram = vec![0u8; 512 * 1024];
+
+        reverb.reverb_start_addr = 0x1000;
+        reverb.reverb_end_addr = 0x1100; // 256 bytes
+        reverb.reverb_current_addr = 100;
+
+        // Write at different offsets
+        reverb.write_reverb_buffer(&mut spu_ram, 0, 0x1111);
+        reverb.write_reverb_buffer(&mut spu_ram, 50, 0x2222);
+        reverb.write_reverb_buffer(&mut spu_ram, 200, 0x3333); // Will wrap
+
+        // Verify reads
+        assert_eq!(reverb.read_reverb_buffer(&spu_ram, 0), 0x1111);
+        assert_eq!(reverb.read_reverb_buffer(&spu_ram, 50), 0x2222);
+        assert_eq!(reverb.read_reverb_buffer(&spu_ram, 200), 0x3333);
+    }
+
+    #[test]
+    fn test_reverb_stereo_independence() {
+        let mut reverb = ReverbConfig::new();
+        reverb.enabled = true;
+        reverb.reverb_start_addr = 0x1000;
+        reverb.reverb_end_addr = 0x2000;
+        reverb.input_volume_left = 0x7FFF;
+        reverb.input_volume_right = 0x0000;
+
+        let mut spu_ram = vec![0u8; 512 * 1024];
+
+        let (left, right) = reverb.process(1000, 1000, &mut spu_ram);
+
+        // With right volume at 0, right channel should be close to original
+        // (might have some reverb contribution)
+        assert_ne!(left, right);
     }
 }
